@@ -154,7 +154,7 @@ struct MediaGridView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
-                NavigationLink(destination: Text("Timeline — coming in Milestone 2")) {
+                NavigationLink(destination: TimelineView(initialAssets: viewModel.selectedAssets)) {
                     Text("Next")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.white)
