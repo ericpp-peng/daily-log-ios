@@ -6,7 +6,9 @@
 import SwiftUI
 
 struct TimelineView: View {
-    let initialAssets: [MediaAsset]
+    let initialItems: [TimelineItem]
+    let initialProject: ProjectEditingConfiguration
+    let onUpdate: ([TimelineItem], ProjectEditingConfiguration) -> Void
     @State private var viewModel = TimelineViewModel()
 
     var body: some View {
@@ -24,8 +26,11 @@ struct TimelineView: View {
         }
         .onAppear {
             if viewModel.items.isEmpty {
-                viewModel.buildTimeline(from: initialAssets)
+                viewModel.load(items: initialItems, project: initialProject)
             }
+        }
+        .onDisappear {
+            onUpdate(viewModel.items, viewModel.project)
         }
     }
 
@@ -89,7 +94,9 @@ struct TimelineView: View {
                     destination: EditorView(
                         initialItems: viewModel.items,
                         initialProject: viewModel.project
-                    )
+                    ) { items, project in
+                        viewModel.load(items: items, project: project)
+                    }
                 ) {
                     HStack(spacing: 6) {
                         Text("Edit")
@@ -154,7 +161,7 @@ private struct TimelineItemRow: View {
             TextField("Note", text: $item.configuration.timestampNote)
                 .font(.subheadline)
                 .textInputAutocapitalization(.sentences)
-                .autocorrectionDisabled()
+                .autocorrectionDisabled(false)
                 .submitLabel(.done)
                 .padding(.horizontal, 12)
                 .frame(height: 40)

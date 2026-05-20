@@ -180,7 +180,14 @@ struct MediaGridView: View {
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
-                NavigationLink(destination: TimelineView(initialAssets: viewModel.selectedAssets)) {
+                NavigationLink(
+                    destination: TimelineView(
+                        initialItems: viewModel.timelineItemsForSelectedAssets(),
+                        initialProject: viewModel.timelineProjectForSelectedAssets()
+                    ) { items, project in
+                        viewModel.saveTimelineDraft(items: items, project: project)
+                    }
+                ) {
                     Text("Next")
                         .font(.body.weight(.semibold))
                         .foregroundStyle(.white)

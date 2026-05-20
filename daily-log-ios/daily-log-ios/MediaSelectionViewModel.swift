@@ -20,6 +20,8 @@ final class MediaSelectionViewModel {
 
     private let service = PhotoLibraryService.shared
     private var selectedAssetIDs: Set<String> = []
+    private var draftTimelineItems: [TimelineItem] = []
+    private var draftProject: ProjectEditingConfiguration = .init()
 
     var filteredAssets: [MediaAsset] {
         switch filter {
@@ -35,6 +37,52 @@ final class MediaSelectionViewModel {
 
     var selectedAssets: [MediaAsset] {
         assets.filter { $0.isSelected }.sorted { $0.sortDate < $1.sortDate }
+    }
+
+    func timelineItemsForSelectedAssets() -> [TimelineItem] {
+        let selected = selectedAssets
+        let selectedByID = Dictionary(uniqueKeysWithValues: selected.map { ($0.id, $0) })
+
+        var items = draftTimelineItems.compactMap { item -> TimelineItem? in
+            guard let asset = selectedByID[item.id] else { return nil }
+            return TimelineItem(
+                id: item.id,
+                asset: asset,
+                orderIndex: item.orderIndex,
+                configuration: item.configuration
+            )
+        }
+
+        let existingIDs = Set(items.map(\.id))
+        let newItems = selected
+            .filter { !existingIDs.contains($0.id) }
+            .map { asset in
+                TimelineItem(
+                    id: asset.id,
+                    asset: asset,
+                    orderIndex: items.count,
+                    configuration: TimelineViewModel.makeInitialConfiguration(for: asset)
+                )
+            }
+
+        items.append(contentsOf: newItems)
+        items.sort { lhs, rhs in
+            lhs.asset.sortDate < rhs.asset.sortDate
+        }
+        for index in items.indices {
+            items[index].orderIndex = index
+        }
+        return items
+    }
+
+    func timelineProjectForSelectedAssets() -> ProjectEditingConfiguration {
+        draftProject
+    }
+
+    func saveTimelineDraft(items: [TimelineItem], project: ProjectEditingConfiguration) {
+        let selectedIDs = Set(selectedAssets.map(\.id))
+        draftTimelineItems = items.filter { selectedIDs.contains($0.id) }
+        draftProject = project
     }
 
     func checkPermission() {

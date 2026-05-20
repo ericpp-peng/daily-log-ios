@@ -18,6 +18,12 @@ final class TimelineViewModel {
     static let maxPhotoDuration: TimeInterval = 8.0
     static let minVideoDuration: TimeInterval = 1.0
 
+    func load(items: [TimelineItem], project: ProjectEditingConfiguration) {
+        self.items = items
+        self.project = project
+        reindex()
+    }
+
     func buildTimeline(from assets: [MediaAsset]) {
         let sorted = assets.sorted { $0.sortDate < $1.sortDate }
         items = sorted.enumerated().map { index, asset in

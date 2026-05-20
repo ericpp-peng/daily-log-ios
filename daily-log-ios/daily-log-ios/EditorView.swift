@@ -12,6 +12,7 @@ struct EditorView: View {
     let initialAssets: [MediaAsset]
     let initialItems: [TimelineItem]
     let initialProject: ProjectEditingConfiguration
+    let onUpdate: ([TimelineItem], ProjectEditingConfiguration) -> Void
 
     @State private var viewModel = TimelineViewModel()
     @State private var playerManager = VideoPlayerManager()
@@ -24,20 +25,24 @@ struct EditorView: View {
 
     init(
         initialAssets: [MediaAsset],
-        initialProject: ProjectEditingConfiguration = .init()
+        initialProject: ProjectEditingConfiguration = .init(),
+        onUpdate: @escaping ([TimelineItem], ProjectEditingConfiguration) -> Void = { _, _ in }
     ) {
         self.initialAssets = initialAssets
         self.initialItems = []
         self.initialProject = initialProject
+        self.onUpdate = onUpdate
     }
 
     init(
         initialItems: [TimelineItem],
-        initialProject: ProjectEditingConfiguration = .init()
+        initialProject: ProjectEditingConfiguration = .init(),
+        onUpdate: @escaping ([TimelineItem], ProjectEditingConfiguration) -> Void = { _, _ in }
     ) {
         self.initialAssets = initialItems.map(\.asset)
         self.initialItems = initialItems
         self.initialProject = initialProject
+        self.onUpdate = onUpdate
     }
 
     var body: some View {
@@ -95,6 +100,7 @@ struct EditorView: View {
         }
         .onDisappear {
             playerManager.pause()
+            onUpdate(viewModel.items, viewModel.project)
         }
         .onChange(of: selectedItemId) { _, newId in
             if let newId, playerManager.currentItem?.id != newId {
