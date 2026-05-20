@@ -3,6 +3,7 @@
 //  daily-log-ios
 //
 
+import Observation
 import SwiftUI
 
 enum MediaFilter {
@@ -10,11 +11,12 @@ enum MediaFilter {
 }
 
 @MainActor
-class MediaSelectionViewModel: ObservableObject {
-    @Published var assets: [MediaAsset] = []
-    @Published var authorizationStatus: PhotoAuthorizationStatus = .notDetermined
-    @Published var isLoading = false
-    @Published var filter: MediaFilter = .all
+@Observable
+final class MediaSelectionViewModel {
+    var assets: [MediaAsset] = []
+    var authorizationStatus: PhotoAuthorizationStatus = .notDetermined
+    var isLoading = false
+    var filter: MediaFilter = .all
 
     private let service = PhotoLibraryService.shared
 

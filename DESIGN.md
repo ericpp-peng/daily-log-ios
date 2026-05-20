@@ -249,30 +249,41 @@ struct MediaAsset: Identifiable {
     }
 }
 
-struct TimelineItem {
+struct TimelineItem: Identifiable {
     let id: String
     let asset: MediaAsset
-    var startTimeInOutput: TimeInterval
-    var displayDuration: TimeInterval
-    var originalCaptureTime: Date?
     var orderIndex: Int
+    var configuration: ClipEditingConfiguration   // per-clip edit state
+
+    var effectiveDuration: TimeInterval { /* trim/rate for video, displayDuration for photo */ }
+}
+
+// Per-clip resumable edit state — mirrors VideoEditorKit's
+// `VideoEditingConfiguration`, scoped to one timeline clip.
+struct ClipEditingConfiguration: Codable, Equatable {
+    var trim: Trim                  // lowerBound / upperBound in source seconds (video)
+    var displayDuration: TimeInterval   // used for photos
+    var playback: Playback          // rate
+    var crop: Crop                  // rotation / mirror / freeformRect
+    var adjusts: Adjusts            // brightness / contrast / saturation
+}
+
+// Project-wide resumable edit state — output settings shared across clips.
+struct ProjectEditingConfiguration: Codable, Equatable {
+    var canvas: Canvas              // aspect-ratio preset
+    var watermark: Watermark?       // export-only image overlay
+    var audio: Audio                // single recorded overdub + track selection
+    var transcript: Transcript      // caption generation feature state
+    var presentation: Presentation  // active tool, social destination, guides
 }
 
 struct DailyLogProject {
     let id: UUID
     let date: Date
     var items: [TimelineItem]
-    var aspectRatio: AspectRatio
-    var photoDuration: TimeInterval
-    var maxVideoDuration: TimeInterval?
+    var project: ProjectEditingConfiguration
     var createdAt: Date
     var updatedAt: Date
-}
-
-enum AspectRatio {
-    case vertical9x16
-    case square1x1
-    case landscape16x9
 }
 ```
 
@@ -280,19 +291,23 @@ enum AspectRatio {
 
 ## 11. Technical Design
 
-**Platform:** iOS
-**Stack:** Swift, SwiftUI, PhotoKit, AVFoundation, Core Data (or JSON) for drafts
+**Platform:** iOS 18.5+
+**Stack:** Swift, SwiftUI, Observation framework (`@Observable`), PhotoKit, AVFoundation, JSON for drafts (Core Data files remain unused)
 
-**Architecture:** MVVM
+**Architecture:** MVVM. Editor follows VideoEditorKit's pattern: shell view → loaded view → tool tray, with `@Observable @MainActor` view models, separate player manager, and resumable `ClipEditingConfiguration` / `ProjectEditingConfiguration` snapshots.
+
+> **Note (Phase 0, 2026-05-19):** Daily Log is in the middle of porting VideoEditorKit's editor architecture in-tree. The MVP "we are not an editor" framing in §20 is being relaxed to support trim, speed, crop, adjusts, audio overdub, transcripts, and watermarks as project goals. The DESIGN doc will be updated phase by phase as the port lands.
 
 ### Modules
 | Module | Responsibility |
 |--------|---------------|
 | `PhotoLibraryService` | Auth, asset fetching, thumbnails, iCloud download |
-| `MediaSelectionViewModel` | Selection state, filtering |
-| `TimelineViewModel` | Timeline ordering, duration assignment |
+| `MediaSelectionViewModel` | Selection state, filtering (`@Observable`) |
+| `TimelineViewModel` | Timeline ordering, duration assignment, project configuration (`@Observable`) |
+| `ClipEditingConfiguration` | Per-clip resumable edit state — trim/speed/crop/adjusts |
+| `ProjectEditingConfiguration` | Project-wide edit state — canvas/watermark/audio/transcript |
 | `VideoExportService` | AVFoundation composition, export, save to Photos |
-| `ProjectStorageService` | Draft persistence |
+| `ProjectStorageService` | Draft persistence (Phase 6) |
 
 ### PhotoLibraryService Interface
 ```swift

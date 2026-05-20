@@ -6,7 +6,7 @@
 import SwiftUI
 
 struct HomeView: View {
-    @StateObject private var viewModel = MediaSelectionViewModel()
+    @State private var viewModel = MediaSelectionViewModel()
     @State private var showDatePicker = false
     @State private var customDate = Date()
     @State private var navigateTo: Date? = nil

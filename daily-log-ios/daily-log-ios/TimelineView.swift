@@ -7,7 +7,7 @@ import SwiftUI
 
 struct TimelineView: View {
     let initialAssets: [MediaAsset]
-    @StateObject private var viewModel = TimelineViewModel()
+    @State private var viewModel = TimelineViewModel()
 
     var body: some View {
         Group {

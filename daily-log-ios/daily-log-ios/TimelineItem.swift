@@ -8,8 +8,8 @@ import Foundation
 struct TimelineItem: Identifiable {
     let id: String
     let asset: MediaAsset
-    var displayDuration: TimeInterval
     var orderIndex: Int
+    var configuration: ClipEditingConfiguration
 
     var captureTime: Date? {
         asset.creationDate ?? asset.modificationDate
@@ -23,9 +23,27 @@ struct TimelineItem: Identifiable {
     }
 
     var durationString: String {
-        let total = Int(displayDuration)
+        Self.formatTime(effectiveDuration)
+    }
+
+    var effectiveDuration: TimeInterval {
+        if asset.type == .video {
+            let rawTrim = max(0, configuration.trim.upperBound - configuration.trim.lowerBound)
+            let rate = max(configuration.playback.rate, 0.01)
+            return rawTrim / rate
+        }
+        return configuration.displayDuration
+    }
+
+    var trimRangeString: String {
+        guard asset.type == .video else { return durationString }
+        return "\(Self.formatTime(configuration.trim.lowerBound)) - \(Self.formatTime(configuration.trim.upperBound))"
+    }
+
+    static func formatTime(_ value: TimeInterval) -> String {
+        let total = Int(value)
         let mins = total / 60
         let secs = total % 60
-        return mins > 0 ? "\(mins):\(String(format: "%02d", secs))" : "\(secs)s"
+        return mins > 0 ? "\(mins):\(String(format: "%02d", secs))" : "0:\(String(format: "%02d", secs))"
     }
 }

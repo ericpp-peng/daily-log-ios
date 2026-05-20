@@ -8,7 +8,7 @@ import Photos
 
 struct MediaGridView: View {
     let date: Date
-    @ObservedObject var viewModel: MediaSelectionViewModel
+    let viewModel: MediaSelectionViewModel
 
     private let columns = [GridItem(.adaptive(minimum: 112), spacing: 2)]
 
