@@ -11,6 +11,7 @@ struct EditorView: View {
     let initialAssets: [MediaAsset]
     @State private var viewModel = TimelineViewModel()
     @State private var playerManager = VideoPlayerManager()
+    @State private var editorViewModel = EditorViewModel()
 
     @State private var selectedItemId: String?
     @State private var draggedClipId: String?
@@ -23,17 +24,36 @@ struct EditorView: View {
 
     var body: some View {
         @Bindable var viewModel = viewModel
-        return VStack(spacing: 0) {
-            timelineHeader
-            Divider()
-            timelineStrip
-            Divider()
-            selectedClipPreview
-            Divider()
+        return ScrollView {
+            VStack(spacing: 0) {
+                timelineHeader
+                Divider()
+                timelineStrip
+                Divider()
+                selectedClipPreview
+                Divider()
+                EditorToolTray(viewModel: editorViewModel)
+            }
+        }
+        .safeAreaInset(edge: .bottom) {
             bottomBar
+                .background(Color(.systemBackground))
         }
         .navigationTitle("Editor")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("Save") {
+                    editorViewModel.showsSaveConfirmation = true
+                }
+                .disabled(viewModel.items.isEmpty)
+            }
+        }
+        .alert("Save", isPresented: $editorViewModel.showsSaveConfirmation) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Project saving will land with Phase 6 (draft persistence).")
+        }
         .onAppear {
             if viewModel.items.isEmpty {
                 viewModel.buildTimeline(from: initialAssets)
