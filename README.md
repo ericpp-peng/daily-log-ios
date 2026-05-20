@@ -64,3 +64,7 @@ Export a 9:16 video with timestamp and per-clip notes burned into the video.
 This is intentionally not a full video editor. The MVP focuses on the daily log use case: fast selection, simple timeline edits, timestamps, notes, and export.
 
 See [DESIGN.md](DESIGN.md) for the full product and technical design.
+
+## Acknowledgements
+
+Thanks to didisouzacosta for creating [didisouzacosta/VideoEditorKit](https://github.com/didisouzacosta/VideoEditorKit). The video editor experience in Daily Log references ideas from that repo.
