@@ -306,6 +306,8 @@ struct DailyLogProject {
 | `TimelineViewModel` | Timeline ordering, duration assignment, project configuration (`@Observable`) |
 | `ClipEditingConfiguration` | Per-clip resumable edit state — trim/speed/crop/adjusts |
 | `ProjectEditingConfiguration` | Project-wide edit state — canvas/watermark/audio/transcript |
+| `VideoPlayerManager` | Multi-clip preview playback. Owns one `AVPlayer` for video clips, holds current `UIImage` for photo clips; advances clip-to-clip; exposes play/pause/seek/scrub state (`@Observable`) |
+| `VideoPlayerLayerView` | `UIViewRepresentable` host for `AVPlayerLayer`. Daily Log is an app target (unlike VideoEditorKit's portable package) so a tiny UIKit bridge is the pragmatic way to render frames without AVKit's native controls |
 | `VideoExportService` | AVFoundation composition, export, save to Photos |
 | `ProjectStorageService` | Draft persistence (Phase 6) |
 
