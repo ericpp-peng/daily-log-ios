@@ -5,10 +5,12 @@
 
 import SwiftUI
 import Photos
+import AVFoundation
 
 struct MediaGridView: View {
     let date: Date
     let viewModel: MediaSelectionViewModel
+    @State private var previewAsset: MediaAsset?
 
     private let gridSpacing: CGFloat = 2
     private let columns = Array(
@@ -61,27 +63,38 @@ struct MediaGridView: View {
 
     @ViewBuilder
     private var contentView: some View {
-        VStack(spacing: 0) {
-            filterBar
-                .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+        ZStack {
+            VStack(spacing: 0) {
+                filterBar
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
 
-            Divider()
-
-            if viewModel.isLoading {
-                Spacer()
-                ProgressView()
-                Spacer()
-            } else if viewModel.filteredAssets.isEmpty {
-                emptyState
-            } else {
-                selectionBar
                 Divider()
-                grid
+
+                if viewModel.isLoading {
+                    Spacer()
+                    ProgressView()
+                    Spacer()
+                } else if viewModel.filteredAssets.isEmpty {
+                    emptyState
+                } else {
+                    selectionBar
+                    Divider()
+                    grid
+                }
+            }
+
+            if let previewAsset {
+                MediaQuickPreviewOverlay(asset: previewAsset) {
+                    withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                        self.previewAsset = nil
+                    }
+                }
+                .zIndex(10)
             }
         }
         .safeAreaInset(edge: .bottom) {
-            if viewModel.selectedCount > 0 {
+            if viewModel.selectedCount > 0, previewAsset == nil {
                 bottomBar
             }
         }
@@ -128,9 +141,17 @@ struct MediaGridView: View {
         ScrollView {
             LazyVGrid(columns: columns, spacing: 2) {
                 ForEach(viewModel.filteredAssets) { asset in
-                    ThumbnailCell(asset: asset) {
-                        viewModel.toggleSelection(for: asset.id)
-                    }
+                    ThumbnailCell(
+                        asset: asset,
+                        onTap: {
+                            viewModel.toggleSelection(for: asset.id)
+                        },
+                        onPreview: {
+                            withAnimation(.spring(response: 0.28, dampingFraction: 0.86)) {
+                                previewAsset = asset
+                            }
+                        }
+                    )
                 }
             }
             .padding(.top, gridSpacing)
@@ -205,6 +226,7 @@ struct FilterTab: View {
 struct ThumbnailCell: View {
     let asset: MediaAsset
     let onTap: () -> Void
+    let onPreview: () -> Void
 
     @State private var thumbnail: UIImage?
     private let thumbSize = CGSize(width: 224, height: 224)
@@ -213,33 +235,32 @@ struct ThumbnailCell: View {
         GeometryReader { proxy in
             let side = min(proxy.size.width, proxy.size.height)
 
-            Button(action: onTap) {
-                ZStack {
-                    thumbnailContent
-                        .frame(width: side, height: side)
-                        .clipped()
+            ZStack {
+                thumbnailContent
+                    .frame(width: side, height: side)
+                    .clipped()
 
-                    if asset.isSelected {
-                        Color.orange.opacity(0.25)
-                    }
+                if asset.isSelected {
+                    Color.orange.opacity(0.25)
                 }
-                .overlay(alignment: .bottomLeading) {
-                    timestampBadge
-                }
-                .overlay(alignment: .bottomTrailing) {
-                    durationBadge
-                }
-                .overlay(alignment: .topLeading) {
-                    orientationBadge
-                }
-                .overlay(alignment: .topTrailing) {
-                    selectionBadge
-                }
-                .frame(width: side, height: side)
-                .clipped()
-                .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .overlay(alignment: .bottomLeading) {
+                timestampBadge
+            }
+            .overlay(alignment: .bottomTrailing) {
+                durationBadge
+            }
+            .overlay(alignment: .topLeading) {
+                orientationBadge
+            }
+            .overlay(alignment: .topTrailing) {
+                selectionBadge
+            }
+            .frame(width: side, height: side)
+            .clipped()
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onTap)
+            .onLongPressGesture(minimumDuration: 0.35, perform: onPreview)
             .frame(width: proxy.size.width, height: proxy.size.height)
         }
         .aspectRatio(1, contentMode: .fit)
@@ -332,6 +353,146 @@ struct ThumbnailCell: View {
         let f = DateFormatter()
         f.dateFormat = "h:mm a"
         return f.string(from: date)
+    }
+
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        let mins = Int(duration) / 60
+        let secs = Int(duration) % 60
+        return mins > 0
+            ? "\(mins):\(String(format: "%02d", secs))"
+            : "0:\(String(format: "%02d", secs))"
+    }
+}
+
+// MARK: - MediaQuickPreviewOverlay
+
+private struct MediaQuickPreviewOverlay: View {
+    let asset: MediaAsset
+    let onDismiss: () -> Void
+
+    @State private var previewImage: UIImage?
+    @State private var player = AVPlayer()
+    @State private var showsVideoPreview = false
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.48)
+                .ignoresSafeArea()
+                .onTapGesture(perform: onDismiss)
+
+            VStack(spacing: 10) {
+                previewSurface
+                    .frame(maxWidth: 320, maxHeight: 430)
+                    .aspectRatio(assetAspectRatio, contentMode: .fit)
+                    .background(Color.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 20, style: .continuous))
+                    .shadow(color: .black.opacity(0.45), radius: 22, x: 0, y: 10)
+
+                metadata
+            }
+            .padding(.horizontal, 28)
+            .transition(
+                .asymmetric(
+                    insertion: .scale(scale: 0.86, anchor: .center).combined(with: .opacity),
+                    removal: .scale(scale: 0.96, anchor: .center).combined(with: .opacity)
+                )
+            )
+        }
+        .task(id: asset.id) {
+            await loadPreview()
+        }
+        .onDisappear {
+            player.pause()
+            player.replaceCurrentItem(with: nil)
+        }
+    }
+
+    @ViewBuilder
+    private var previewSurface: some View {
+        if showsVideoPreview {
+            VideoPlayerLayerView(player: player)
+        } else if let previewImage {
+            Image(uiImage: previewImage)
+                .resizable()
+                .scaledToFit()
+        } else {
+            ProgressView()
+                .tint(.white)
+                .frame(width: 220, height: 260)
+        }
+    }
+
+    private var metadata: some View {
+        HStack(spacing: 8) {
+            Image(systemName: iconName)
+            Text(titleText)
+            if let duration = asset.duration {
+                Text(formatDuration(duration))
+            }
+        }
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 7)
+        .background(Color.black.opacity(0.62))
+        .clipShape(Capsule())
+    }
+
+    private var assetAspectRatio: CGFloat {
+        let width = max(CGFloat(asset.phAsset.pixelWidth), 1)
+        let height = max(CGFloat(asset.phAsset.pixelHeight), 1)
+        return width / height
+    }
+
+    private var iconName: String {
+        switch asset.type {
+        case .video: return "video.fill"
+        case .livePhoto: return "livephoto"
+        case .image: return "photo.fill"
+        case .unknown: return "questionmark.square.fill"
+        }
+    }
+
+    private var titleText: String {
+        guard let date = asset.creationDate ?? asset.modificationDate else {
+            return "Preview"
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+
+    private func loadPreview() async {
+        showsVideoPreview = false
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+
+        if asset.type == .video || asset.type == .livePhoto,
+           let avAsset = await PhotoLibraryService.shared.requestAVAsset(for: asset) {
+            configurePreviewAudioSession()
+            let item = AVPlayerItem(asset: avAsset)
+            player.replaceCurrentItem(with: item)
+            player.volume = 1
+            player.isMuted = false
+            showsVideoPreview = true
+            player.play()
+            return
+        }
+
+        previewImage = await PhotoLibraryService.shared.requestPreviewImage(
+            for: asset,
+            targetSize: CGSize(width: 1200, height: 1200)
+        )
+    }
+
+    private func configurePreviewAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            // The preview can still show video if the audio session cannot be activated.
+        }
     }
 
     private func formatDuration(_ duration: TimeInterval) -> String {

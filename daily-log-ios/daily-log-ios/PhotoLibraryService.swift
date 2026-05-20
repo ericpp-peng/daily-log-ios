@@ -182,7 +182,36 @@ class PhotoLibraryService {
         return duration.seconds
     }
 
+    func cleanupStaleLivePhotoVideoCache(olderThan age: TimeInterval = 24 * 60 * 60) {
+        let fileManager = FileManager.default
+        let directory = livePhotoPairedVideoDirectory
+        let cutoff = Date().addingTimeInterval(-age)
+
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        for url in urls {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            guard values?.isRegularFile == true,
+                  let modified = values?.contentModificationDate,
+                  modified < cutoff else {
+                continue
+            }
+            try? fileManager.removeItem(at: url)
+        }
+    }
+
     // MARK: - Private
+
+    private var livePhotoPairedVideoDirectory: URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("DailyLogLivePhotoVideos", isDirectory: true)
+    }
 
     private func requestLivePhotoPairedVideoAsset(for asset: MediaAsset) async -> AVAsset? {
         guard let resource = PHAssetResource
@@ -233,8 +262,7 @@ class PhotoLibraryService {
         let ext = (resource.originalFilename as NSString).pathExtension
         let fileExtension = ext.isEmpty ? "mov" : ext
 
-        return FileManager.default.temporaryDirectory
-            .appendingPathComponent("DailyLogLivePhotoVideos", isDirectory: true)
+        return livePhotoPairedVideoDirectory
             .appendingPathComponent("\(safeIdentifier).\(fileExtension)")
     }
 

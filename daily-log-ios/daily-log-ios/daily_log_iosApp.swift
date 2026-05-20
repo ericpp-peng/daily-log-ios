@@ -9,6 +9,11 @@ import SwiftUI
 
 @main
 struct daily_log_iosApp: App {
+    init() {
+        VideoExportService.shared.cleanupStaleTemporaryFiles()
+        PhotoLibraryService.shared.cleanupStaleLivePhotoVideoCache()
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()

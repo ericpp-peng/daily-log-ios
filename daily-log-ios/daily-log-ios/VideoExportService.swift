@@ -48,16 +48,12 @@ class VideoExportService {
         let duration: CMTime
     }
 
-    private struct VideoColorProperties {
-        let primaries: String
-        let transferFunction: String
-        let yCbCrMatrix: String
-
-        var isHDR: Bool {
-            transferFunction == AVVideoTransferFunction_ITU_R_2100_HLG ||
-            transferFunction == AVVideoTransferFunction_SMPTE_ST_2084_PQ ||
-            primaries == AVVideoColorPrimaries_ITU_R_2020
-        }
+    private var sdrColorProperties: [String: Any] {
+        [
+            AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_709_2,
+            AVVideoTransferFunctionKey: AVVideoTransferFunction_ITU_R_709_2,
+            AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_709_2
+        ]
     }
 
     func export(
@@ -84,7 +80,10 @@ class VideoExportService {
         var instructions: [AVMutableVideoCompositionInstruction] = []
         var timestampSegments: [TimestampSegment] = []
         var cursor = CMTime.zero
-        var preferredColorProperties: VideoColorProperties?
+        var intermediateURLs: [URL] = []
+        defer {
+            removeTemporaryFiles(intermediateURLs)
+        }
 
         for item in items {
             if item.usesVideoPlayback {
@@ -92,11 +91,6 @@ class VideoExportService {
                       let sourceVideoTrack = asset.tracks(withMediaType: .video).first else {
                     continue
                 }
-                if let colorProperties = videoColorProperties(for: sourceVideoTrack),
-                   preferredColorProperties == nil || colorProperties.isHDR {
-                    preferredColorProperties = colorProperties
-                }
-
                 let loadedDuration = try? await asset.load(.duration)
                 let sourceDuration = loadedDuration?.seconds ?? item.configuration.trim.upperBound
                 let safeSourceDuration = max(sourceDuration, 0.1)
@@ -147,6 +141,7 @@ class VideoExportService {
                     duration: durationSeconds,
                     renderSize: renderSize
                 )
+                intermediateURLs.append(stillURL)
                 let stillAsset = AVAsset(url: stillURL)
                 guard let stillTrack = stillAsset.tracks(withMediaType: .video).first else { continue }
 
@@ -180,11 +175,9 @@ class VideoExportService {
         videoComposition.renderScale = 1.0
         videoComposition.frameDuration = CMTime(value: 1, timescale: frameRate)
         videoComposition.instructions = instructions
-        if let preferredColorProperties {
-            videoComposition.colorPrimaries = preferredColorProperties.primaries
-            videoComposition.colorTransferFunction = preferredColorProperties.transferFunction
-            videoComposition.colorYCbCrMatrix = preferredColorProperties.yCbCrMatrix
-        }
+        videoComposition.colorPrimaries = AVVideoColorPrimaries_ITU_R_709_2
+        videoComposition.colorTransferFunction = AVVideoTransferFunction_ITU_R_709_2
+        videoComposition.colorYCbCrMatrix = AVVideoYCbCrMatrix_ITU_R_709_2
         if timestamp.enabled {
             videoComposition.animationTool = timestampAnimationTool(
                 for: timestampSegments,
@@ -193,15 +186,11 @@ class VideoExportService {
             )
         }
 
-        let exportPreset = preferredColorProperties?.isHDR == true
-            ? AVAssetExportPresetHEVCHighestQuality
-            : AVAssetExportPresetHighestQuality
-
         do {
             return try await runExport(
                 composition: composition,
                 videoComposition: videoComposition,
-                presetName: exportPreset,
+                presetName: AVAssetExportPresetHighestQuality,
                 preferredType: .mp4,
                 fileExtension: "mp4"
             )
@@ -214,7 +203,7 @@ class VideoExportService {
                     return try await runExport(
                         composition: composition,
                         videoComposition: videoComposition,
-                        presetName: exportPreset,
+                        presetName: AVAssetExportPresetHighestQuality,
                         preferredType: .mov,
                         fileExtension: "mov"
                     )
@@ -245,6 +234,35 @@ class VideoExportService {
                     continuation.resume(throwing: VideoExportError.saveFailed(underlying: nil))
                 }
             }
+        }
+    }
+
+    func removeTemporaryFile(at url: URL) {
+        guard isDailyLogTemporaryFile(url) else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    func cleanupStaleTemporaryFiles(olderThan age: TimeInterval = 24 * 60 * 60) {
+        let fileManager = FileManager.default
+        let directory = fileManager.temporaryDirectory
+        let cutoff = Date().addingTimeInterval(-age)
+
+        guard let urls = try? fileManager.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey],
+            options: [.skipsHiddenFiles]
+        ) else {
+            return
+        }
+
+        for url in urls where isDailyLogTemporaryFile(url) {
+            let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isRegularFileKey])
+            guard values?.isRegularFile == true,
+                  let modified = values?.contentModificationDate,
+                  modified < cutoff else {
+                continue
+            }
+            try? fileManager.removeItem(at: url)
         }
     }
 
@@ -314,6 +332,24 @@ class VideoExportService {
         return FileManager.default.temporaryDirectory.appendingPathComponent(filename)
     }
 
+    private func removeTemporaryFiles(_ urls: [URL]) {
+        for url in urls {
+            removeTemporaryFile(at: url)
+        }
+    }
+
+    private func isDailyLogTemporaryFile(_ url: URL) -> Bool {
+        let standardizedURL = url.standardizedFileURL
+        let temporaryDirectory = FileManager.default.temporaryDirectory.standardizedFileURL
+        guard standardizedURL.deletingLastPathComponent() == temporaryDirectory else {
+            return false
+        }
+
+        let fileName = standardizedURL.lastPathComponent
+        let fileExtension = standardizedURL.pathExtension.lowercased()
+        return fileName.hasPrefix("daily-log-") && ["mov", "mp4"].contains(fileExtension)
+    }
+
     private func makeStillVideo(
         from image: UIImage,
         duration: TimeInterval,
@@ -325,7 +361,8 @@ class VideoExportService {
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: renderSize.width,
-            AVVideoHeightKey: renderSize.height
+            AVVideoHeightKey: renderSize.height,
+            AVVideoColorPropertiesKey: sdrColorProperties
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
@@ -380,7 +417,8 @@ class VideoExportService {
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: renderSize.width,
-            AVVideoHeightKey: renderSize.height
+            AVVideoHeightKey: renderSize.height,
+            AVVideoColorPropertiesKey: sdrColorProperties
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false
@@ -487,13 +525,14 @@ class VideoExportService {
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
 
         let bitmapInfo = CGBitmapInfo.byteOrder32Little.union(.init(rawValue: CGImageAlphaInfo.premultipliedFirst.rawValue))
+        let colorSpace = CGColorSpace(name: CGColorSpace.itur_709) ?? CGColorSpaceCreateDeviceRGB()
         guard let context = CGContext(
             data: CVPixelBufferGetBaseAddress(buffer),
             width: Int(size.width),
             height: Int(size.height),
             bitsPerComponent: 8,
             bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
-            space: CGColorSpaceCreateDeviceRGB(),
+            space: colorSpace,
             bitmapInfo: bitmapInfo.rawValue
         ) else {
             return nil
@@ -517,6 +556,7 @@ class VideoExportService {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
+        format.preferredRange = .standard
 
         return UIGraphicsImageRenderer(size: size, format: format).image { context in
             UIColor.black.setFill()
@@ -620,6 +660,7 @@ class VideoExportService {
         let horizontalPadding: CGFloat = 28
         let verticalPadding: CGFloat = 16
         let margin: CGFloat = 56
+        let topMargin: CGFloat = 112
         let textSize = (text as NSString).size(withAttributes: [
             .font: timestampUIFont(for: style.font, size: fontSize)
         ])
@@ -629,7 +670,7 @@ class VideoExportService {
         let container = CALayer()
         container.frame = CGRect(
             x: margin,
-            y: renderSize.height - margin - height,
+            y: topMargin,
             width: width,
             height: height
         )
@@ -665,10 +706,11 @@ class VideoExportService {
         let horizontalPadding: CGFloat = 28
         let verticalPadding: CGFloat = 16
         let margin: CGFloat = 56
+        let topMargin: CGFloat = 112
         let textSize = (text as NSString).size(withAttributes: [.font: font])
         let badgeRect = CGRect(
             x: margin,
-            y: rect.height - margin - ceil(textSize.height + verticalPadding * 2),
+            y: topMargin,
             width: ceil(textSize.width + horizontalPadding * 2),
             height: ceil(textSize.height + verticalPadding * 2)
         )
@@ -708,22 +750,6 @@ class VideoExportService {
         case .monospaced:
             return .monospacedDigitSystemFont(ofSize: size, weight: .semibold)
         }
-    }
-
-    private func videoColorProperties(for track: AVAssetTrack) -> VideoColorProperties? {
-        guard let rawFormatDescription = track.formatDescriptions.first,
-              let extensions = CMFormatDescriptionGetExtensions(rawFormatDescription as! CMFormatDescription) as NSDictionary?,
-              let primaries = extensions[kCMFormatDescriptionExtension_ColorPrimaries] as? String,
-              let transferFunction = extensions[kCMFormatDescriptionExtension_TransferFunction] as? String,
-              let yCbCrMatrix = extensions[kCMFormatDescriptionExtension_YCbCrMatrix] as? String else {
-            return nil
-        }
-
-        return VideoColorProperties(
-            primaries: primaries,
-            transferFunction: transferFunction,
-            yCbCrMatrix: yCbCrMatrix
-        )
     }
 
     private func videoTransform(for track: AVAssetTrack, renderSize: CGSize) -> CGAffineTransform {

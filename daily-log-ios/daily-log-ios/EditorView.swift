@@ -145,26 +145,21 @@ struct EditorView: View {
                 Button {
                     Task { await exportTimeline() }
                 } label: {
-                    topIconLabel(systemName: "square.and.arrow.up")
-                }
-                .disabled(isExporting || viewModel.items.isEmpty)
-
-                Button {
-                    Task { await exportTimeline() }
-                } label: {
-                    ZStack {
-                        Circle()
-                            .fill(Color.blue)
+                    HStack(spacing: 8) {
                         if isExporting {
                             ProgressView()
                                 .tint(.white)
+                                .scaleEffect(0.82)
                         } else {
-                            Image(systemName: "checkmark")
-                                .font(.title.weight(.medium))
-                                .foregroundStyle(.white)
+                            Text("Export")
+                                .font(.body.weight(.semibold))
                         }
                     }
-                    .frame(width: 48, height: 48)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 20)
+                    .frame(height: 48)
+                    .background(Color.blue)
+                    .clipShape(Capsule())
                 }
                 .disabled(isExporting || viewModel.items.isEmpty)
             }
@@ -194,7 +189,7 @@ struct EditorView: View {
     // MARK: - Preview
 
     private var previewSurface: some View {
-        ZStack(alignment: .bottomLeading) {
+        ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.black)
 
@@ -215,21 +210,39 @@ struct EditorView: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
 
-            if viewModel.project.timestamp.enabled,
-               let timestampText = previewTimestampText {
-                Text(timestampText)
-                    .font(timestampPreviewFont)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(.black.opacity(0.58))
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .padding(18)
+            GeometryReader { proxy in
+                if viewModel.project.timestamp.enabled,
+                   let timestampText = previewTimestampText {
+                    Text(timestampText)
+                        .font(timestampPreviewFont)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.black.opacity(0.58))
+                        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                        .position(previewTimestampPosition(in: proxy.size))
+                }
             }
         }
         .aspectRatio(viewModel.project.canvas.preset.aspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private func previewTimestampPosition(in size: CGSize) -> CGPoint {
+        let exportRenderSize = CGSize(width: 1080, height: 1920)
+        let exportLeftMargin: CGFloat = 56
+        let exportTopMargin: CGFloat = 112
+        let previewHorizontalPadding: CGFloat = 12
+        let previewVerticalPadding: CGFloat = 7
+        let approximateTextHeight: CGFloat = 17
+
+        let x = size.width * (exportLeftMargin / exportRenderSize.width) + previewHorizontalPadding
+        let y = size.height * (exportTopMargin / exportRenderSize.height)
+            + previewVerticalPadding
+            + approximateTextHeight / 2
+
+        return CGPoint(x: x, y: y)
     }
 
     private var previewTimestampText: String? {
@@ -661,6 +674,9 @@ struct EditorView: View {
                 items: viewModel.items,
                 timestamp: viewModel.project.timestamp
             )
+            defer {
+                VideoExportService.shared.removeTemporaryFile(at: url)
+            }
             try await VideoExportService.shared.saveToPhotoLibrary(url: url)
             exportMessage = "Saved to Photos."
         } catch {
