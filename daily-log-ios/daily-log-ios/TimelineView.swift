@@ -85,19 +85,21 @@ struct TimelineView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                // Export — Milestone 4
-                Button {
-                } label: {
-                    Text("Export")
-                        .font(.body.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 10)
-                        .background(Color.orange)
-                        .clipShape(Capsule())
+                NavigationLink(destination: EditorView(initialAssets: viewModel.items.map(\.asset))) {
+                    HStack(spacing: 6) {
+                        Text("Edit")
+                            .font(.body.weight(.semibold))
+                        Image(systemName: "arrow.right")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 26)
+                    .padding(.vertical, 10)
+                    .background(Color.orange)
+                    .clipShape(Capsule())
                 }
-                .disabled(true)
-                .opacity(0.5)
+                .disabled(viewModel.items.isEmpty)
+                .opacity(viewModel.items.isEmpty ? 0.5 : 1)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
