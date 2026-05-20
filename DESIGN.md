@@ -309,7 +309,10 @@ struct DailyLogProject {
 | `VideoPlayerManager` | Multi-clip preview playback. Owns one `AVPlayer` for video clips, holds current `UIImage` for photo clips; advances clip-to-clip; exposes play/pause/seek/scrub state (`@Observable`) |
 | `VideoPlayerLayerView` | `UIViewRepresentable` host for `AVPlayerLayer`. Daily Log is an app target (unlike VideoEditorKit's portable package) so a tiny UIKit bridge is the pragmatic way to render frames without AVKit's native controls |
 | `EditorViewModel` | Ephemeral editor presentation state — selected tool, save confirmation visibility (`@Observable`). Persisted presentation lives in `ProjectEditingConfiguration.Presentation` |
-| `EditorToolTray` | Horizontal tool selector (cut / speed / canvas / adjust / audio / captions) plus selected-tool panel. Panels are placeholders in Phase 2; populated in Phase 3+ |
+| `EditorToolTray` | Horizontal tool selector (cut / speed / canvas / adjust / audio / captions) plus selected-tool panel. Cut panel ships in Phase 3a; other panels are placeholders |
+| `DualHandleRangeSlider` | Generic two-handle range slider, modeled on VideoEditorKit's `RangedSliderView`. Each handle tracks its own drag-start value for stable multi-touch; minimum-distance enforced symmetrically |
+| `ClipThumbnailStrip` | N-thumbnail strip for one asset. Videos: extracts evenly-spaced frames via `AVAssetImageGenerator`. Photos: stretches preview image |
+| `ClipTrimView` | Cut/trim tool panel. Videos: thumbnail strip + dual-handle range slider bound to `ClipEditingConfiguration.trim`. Photos: single thumbnail + duration slider bound to `ClipEditingConfiguration.displayDuration` |
 | `VideoExportService` | AVFoundation composition, export, save to Photos |
 | `ProjectStorageService` | Draft persistence (Phase 6) |
 

@@ -12,6 +12,9 @@ import SwiftUI
 
 struct EditorToolTray: View {
     @Bindable var viewModel: EditorViewModel
+    var clipBinding: Binding<TimelineItem>?
+    var onClipEditingStarted: () -> Void = {}
+    var onClipEditingEnded: () -> Void = {}
 
     var body: some View {
         VStack(spacing: 10) {
@@ -46,10 +49,27 @@ struct EditorToolTray: View {
 
     @ViewBuilder
     private func toolPanel(for tool: EditorViewModel.Tool) -> some View {
+        switch tool {
+        case .cut:
+            if let clipBinding {
+                ClipTrimView(
+                    item: clipBinding,
+                    onEditingStarted: onClipEditingStarted,
+                    onEditingEnded: onClipEditingEnded
+                )
+            } else {
+                placeholderPanel(for: tool, message: "Tap a clip in the timeline strip to trim it.")
+            }
+        default:
+            placeholderPanel(for: tool, message: placeholderCopy(for: tool))
+        }
+    }
+
+    private func placeholderPanel(for tool: EditorViewModel.Tool, message: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(tool.title)
                 .font(.subheadline.weight(.semibold))
-            Text(placeholderCopy(for: tool))
+            Text(message)
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -70,7 +90,7 @@ struct EditorToolTray: View {
 
     private func placeholderCopy(for tool: EditorViewModel.Tool) -> String {
         switch tool {
-        case .cut:        return "Trim each video clip — coming in Phase 3."
+        case .cut:        return "Tap a clip in the timeline strip to trim it."
         case .speed:      return "Change clip playback rate — coming in Phase 3."
         case .presets:    return "Canvas / aspect-ratio presets — coming in Phase 4."
         case .adjusts:    return "Brightness, contrast, saturation — coming in Phase 3."

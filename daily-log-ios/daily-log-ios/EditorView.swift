@@ -32,7 +32,12 @@ struct EditorView: View {
                 Divider()
                 selectedClipPreview
                 Divider()
-                EditorToolTray(viewModel: editorViewModel)
+                EditorToolTray(
+                    viewModel: editorViewModel,
+                    clipBinding: selectedClipBinding(viewModel: viewModel),
+                    onClipEditingStarted: handleClipEditingStarted,
+                    onClipEditingEnded: handleClipEditingEnded
+                )
             }
         }
         .safeAreaInset(edge: .bottom) {
@@ -264,6 +269,28 @@ struct EditorView: View {
     private var selectedItem: TimelineItem? {
         guard let selectedItemId else { return nil }
         return viewModel.items.first(where: { $0.id == selectedItemId })
+    }
+
+    private func selectedClipBinding(viewModel: TimelineViewModel) -> Binding<TimelineItem>? {
+        guard let selectedItemId,
+              let index = viewModel.items.firstIndex(where: { $0.id == selectedItemId }) else {
+            return nil
+        }
+        return Binding(
+            get: { viewModel.items[index] },
+            set: { viewModel.items[index] = $0 }
+        )
+    }
+
+    private func handleClipEditingStarted() {
+        playerManager.pause()
+    }
+
+    private func handleClipEditingEnded() {
+        playerManager.update(items: viewModel.items)
+        if let selectedItemId {
+            playerManager.selectItem(id: selectedItemId)
+        }
     }
 
     private func removeSelected() {
