@@ -13,7 +13,6 @@ struct EditorView: View {
 
     @State private var viewModel = TimelineViewModel()
     @State private var playerManager = VideoPlayerManager()
-    @State private var editorViewModel = EditorViewModel()
 
     @State private var selectedItemId: String?
     @State private var draggedClipId: String?
@@ -30,11 +29,11 @@ struct EditorView: View {
             VStack(spacing: 0) {
                 topBar
 
-                ScrollView(.vertical, showsIndicators: false) {
-                    VStack(spacing: 28) {
+                GeometryReader { proxy in
+                    VStack(spacing: 16) {
                         previewSurface
                             .padding(.horizontal, 28)
-                            .padding(.top, 26)
+                            .frame(maxHeight: previewHeight(for: proxy.size.height))
 
                         playbackTimeline(
                             clipBinding: selectedClipBinding(viewModel: bindableViewModel),
@@ -42,14 +41,10 @@ struct EditorView: View {
                         )
                         .padding(.horizontal, 24)
                     }
-                    .padding(.bottom, 24)
+                    .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
+                    .padding(.top, 10)
+                    .padding(.bottom, 8)
                 }
-
-                EditorToolTray(
-                    viewModel: editorViewModel,
-                    canvasSubtitle: viewModel.project.canvas.preset.displayName
-                )
-                .padding(.bottom, 10)
             }
         }
         .preferredColorScheme(.dark)
@@ -166,6 +161,10 @@ struct EditorView: View {
             )
     }
 
+    private func previewHeight(for availableHeight: CGFloat) -> CGFloat {
+        max(220, availableHeight - 240)
+    }
+
     // MARK: - Preview
 
     private var previewSurface: some View {
@@ -174,13 +173,13 @@ struct EditorView: View {
                 .fill(Color.black)
 
             if let clip = currentClip {
-                if clip.asset.type == .video {
+                if clip.usesVideoPlayback {
                     VideoPlayerLayerView(player: playerManager.player)
                         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 } else if let image = playerManager.currentImage {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFill()
+                        .scaledToFit()
                 } else if playerManager.isLoadingClip {
                     ProgressView().tint(.white)
                 }
@@ -201,14 +200,14 @@ struct EditorView: View {
         clipBinding: Binding<TimelineItem>?,
         items: Binding<[TimelineItem]>
     ) -> some View {
-        HStack(alignment: .center, spacing: 22) {
+        HStack(alignment: .center, spacing: 16) {
             Button {
                 playerManager.toggle()
             } label: {
                 Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
                     .font(.title2.weight(.semibold))
                     .foregroundStyle(Color.blue)
-                    .frame(width: 72, height: 72)
+                    .frame(width: 64, height: 64)
                     .background(.white.opacity(0.08))
                     .clipShape(Circle())
                     .overlay(
@@ -219,7 +218,12 @@ struct EditorView: View {
             .disabled(viewModel.items.isEmpty)
 
             VStack(spacing: 8) {
-                timeBadge
+                timelineTimeHeader
+
+                if let clipBinding, clipBinding.wrappedValue.asset.type == .livePhoto {
+                    livePhotoModeControl(for: clipBinding)
+                        .zIndex(2)
+                }
 
                 if let clipBinding {
                     ClipPlaybackTimelineTrack(
@@ -273,17 +277,90 @@ struct EditorView: View {
         .frame(height: 52)
     }
 
+    private func livePhotoModeControl(for item: Binding<TimelineItem>) -> some View {
+        HStack(spacing: 2) {
+            livePhotoModeButton(
+                title: "Live",
+                systemImage: "livephoto",
+                mode: .video,
+                item: item.wrappedValue
+            )
+            livePhotoModeButton(
+                title: "Photo",
+                systemImage: "photo",
+                mode: .photo,
+                item: item.wrappedValue
+            )
+        }
+        .padding(3)
+        .background(.white.opacity(0.09))
+        .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(.white.opacity(0.12), lineWidth: 1)
+        )
+        .contentShape(Capsule())
+    }
+
+    private func livePhotoModeButton(
+        title: String,
+        systemImage: String,
+        mode: ClipEditingConfiguration.LivePhotoMode,
+        item: TimelineItem
+    ) -> some View {
+        let isSelected = item.configuration.livePhotoMode == mode
+
+        return Button {
+            setLivePhotoMode(mode, for: item.id)
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.caption.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(isSelected ? Color.blue : Color.clear)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var timelineTimeHeader: some View {
+        HStack(spacing: 8) {
+            timeBadge
+            totalDurationBadge
+        }
+    }
+
     private var timeBadge: some View {
         Text("\(Self.formatPreciseTime(currentClipLocalTime)) / \(Self.formatPreciseTime(currentClipDuration))")
-            .font(.caption.monospacedDigit())
+            .font(.caption2.monospacedDigit())
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
             .foregroundStyle(.white)
-            .padding(.horizontal, 12)
+            .padding(.horizontal, 10)
             .padding(.vertical, 8)
             .background(.white.opacity(0.09))
             .clipShape(Capsule())
             .overlay(
                 Capsule()
                     .stroke(.white.opacity(0.12), lineWidth: 1)
+            )
+    }
+
+    private var totalDurationBadge: some View {
+        Text("Total \(Self.formatPreciseTime(viewModel.totalDuration))")
+            .font(.caption2.monospacedDigit())
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .foregroundStyle(.white.opacity(0.82))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.06))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(.white.opacity(0.1), lineWidth: 1)
             )
     }
 
@@ -299,7 +376,7 @@ struct EditorView: View {
 
     private var currentClipStartLabel: String {
         guard let clip = currentClip else { return "00:00.00" }
-        if clip.asset.type == .video {
+        if clip.usesVideoPlayback {
             return Self.formatPreciseTime(clip.configuration.trim.lowerBound)
         }
         return Self.formatPreciseTime(clip.configuration.trim.lowerBound)
@@ -307,7 +384,7 @@ struct EditorView: View {
 
     private var currentClipEndLabel: String {
         guard let clip = currentClip else { return "00:00.00" }
-        if clip.asset.type == .video {
+        if clip.usesVideoPlayback {
             return Self.formatPreciseTime(clip.configuration.trim.upperBound)
         }
         return Self.formatPreciseTime(clip.configuration.trim.upperBound)
@@ -344,6 +421,69 @@ struct EditorView: View {
             get: { viewModel.items[index] },
             set: { viewModel.items[index] = $0 }
         )
+    }
+
+    private func setLivePhotoMode(
+        _ mode: ClipEditingConfiguration.LivePhotoMode,
+        for itemId: String
+    ) {
+        guard let index = viewModel.items.firstIndex(where: { $0.id == itemId }),
+              viewModel.items[index].asset.type == .livePhoto else {
+            return
+        }
+
+        if mode == .photo {
+            applyLivePhotoPhotoMode(at: index)
+            refreshPlayerAfterClipModeChange(itemId: itemId)
+            return
+        }
+
+        let asset = viewModel.items[index].asset
+        applyLivePhotoVideoMode(at: index, sourceDuration: nil)
+        refreshPlayerAfterClipModeChange(itemId: itemId)
+
+        Task {
+            let duration = await PhotoLibraryService.shared.requestVideoDuration(for: asset)
+            await MainActor.run {
+                guard let index = viewModel.items.firstIndex(where: { $0.id == itemId }) else {
+                    return
+                }
+                applyLivePhotoVideoMode(at: index, sourceDuration: duration)
+                refreshPlayerAfterClipModeChange(itemId: itemId)
+            }
+        }
+    }
+
+    private func applyLivePhotoPhotoMode(at index: Int) {
+        let duration = min(
+            max(viewModel.items[index].configuration.displayDuration, TimelineViewModel.minPhotoDuration),
+            TimelineViewModel.maxPhotoDuration
+        )
+        viewModel.items[index].configuration.livePhotoMode = .photo
+        viewModel.items[index].configuration.trim.lowerBound = 0
+        viewModel.items[index].configuration.trim.upperBound = duration
+        viewModel.items[index].configuration.displayDuration = duration
+    }
+
+    private func applyLivePhotoVideoMode(at index: Int, sourceDuration: TimeInterval?) {
+        let fallbackDuration = min(
+            max(viewModel.items[index].configuration.displayDuration, TimelineViewModel.minVideoDuration),
+            TimelineViewModel.defaultMaxVideoDuration
+        )
+        let duration = max(sourceDuration ?? fallbackDuration, TimelineViewModel.minVideoDuration)
+        viewModel.items[index].configuration.livePhotoMode = .video
+        viewModel.items[index].configuration.trim.lowerBound = 0
+        viewModel.items[index].configuration.trim.upperBound = duration
+        viewModel.items[index].configuration.displayDuration = min(
+            max(duration, TimelineViewModel.minPhotoDuration),
+            TimelineViewModel.maxPhotoDuration
+        )
+    }
+
+    private func refreshPlayerAfterClipModeChange(itemId: String) {
+        playerManager.pause()
+        playerManager.update(items: viewModel.items)
+        playerManager.selectItem(id: itemId)
     }
 
     private func seekSelectedClip(toLocalTime localTime: TimeInterval) {
@@ -417,7 +557,11 @@ private struct ClipPlaybackTimelineTrack: View {
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                ClipThumbnailStrip(asset: item.asset, thumbnailCount: thumbnailCount)
+                ClipThumbnailStrip(
+                    asset: item.asset,
+                    thumbnailCount: thumbnailCount,
+                    prefersVideo: item.usesVideoPlayback
+                )
                     .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .gesture(seekGesture(width: proxy.size.width))
 
@@ -426,15 +570,16 @@ private struct ClipPlaybackTimelineTrack: View {
                 playhead(width: proxy.size.width)
             }
         }
+        .clipped()
     }
 
     private var thumbnailCount: Int {
-        item.asset.type == .video ? 8 : 1
+        item.usesVideoPlayback ? 8 : 1
     }
 
     @ViewBuilder
     private func trimOverlay(width: CGFloat) -> some View {
-        if item.asset.type == .video {
+        if item.usesVideoPlayback {
             let sourceDuration = videoSourceDuration
             DualHandleRangeSlider(
                 lowerBound: trimLowerBinding(sourceDuration: sourceDuration),
@@ -574,7 +719,7 @@ private struct ClipPlaybackTimelineTrack: View {
         guard width > 0 else { return }
         let progress = min(max(x / width, 0), 1)
 
-        if item.asset.type == .video {
+        if item.usesVideoPlayback {
             let sourceTime = (Double(progress) * videoSourceDuration)
                 .clamped(to: item.configuration.trim.lowerBound...item.configuration.trim.upperBound)
             let rate = max(item.configuration.playback.rate, 0.01)
@@ -590,7 +735,7 @@ private struct ClipPlaybackTimelineTrack: View {
     private func playheadX(width: CGFloat) -> CGFloat {
         guard width > 0 else { return 0 }
 
-        if item.asset.type == .video {
+        if item.usesVideoPlayback {
             let rate = max(item.configuration.playback.rate, 0.01)
             let sourceTime = item.configuration.trim.lowerBound + (localPlaybackTime * rate)
             let progress = sourceTime / max(videoSourceDuration, 0.001)
@@ -635,7 +780,7 @@ private struct MiniTimelineClip: View {
                 .frame(width: 74, height: 44)
                 .clipped()
 
-                Image(systemName: item.asset.type == .video ? "video.fill" : "photo.fill")
+                Image(systemName: item.usesVideoPlayback ? "video.fill" : "photo.fill")
                     .font(.caption2)
                     .foregroundStyle(.white)
                     .padding(5)

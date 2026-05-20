@@ -42,10 +42,22 @@ class VideoExportService {
     private let renderSize = CGSize(width: 1080, height: 1920)
     private let frameRate: Int32 = 30
 
+    private struct VideoColorProperties {
+        let primaries: String
+        let transferFunction: String
+        let yCbCrMatrix: String
+
+        var isHDR: Bool {
+            transferFunction == AVVideoTransferFunction_ITU_R_2100_HLG ||
+            transferFunction == AVVideoTransferFunction_SMPTE_ST_2084_PQ ||
+            primaries == AVVideoColorPrimaries_ITU_R_2020
+        }
+    }
+
     func export(items: [TimelineItem]) async throws -> URL {
         guard !items.isEmpty else { throw VideoExportError.noItems }
 
-        if items.allSatisfy({ $0.asset.type != .video }) {
+        if items.allSatisfy({ !$0.usesVideoPlayback }) {
             return try await exportStillsOnly(items: items)
         }
 
@@ -56,25 +68,46 @@ class VideoExportService {
         ) else {
             throw VideoExportError.exportFailed(status: nil, underlying: nil)
         }
+        let audioTrack = composition.addMutableTrack(
+            withMediaType: .audio,
+            preferredTrackID: kCMPersistentTrackID_Invalid
+        )
         var instructions: [AVMutableVideoCompositionInstruction] = []
         var cursor = CMTime.zero
+        var preferredColorProperties: VideoColorProperties?
 
         for item in items {
-            if item.asset.type == .video {
+            if item.usesVideoPlayback {
                 guard let asset = await PhotoLibraryService.shared.requestAVAsset(for: item.asset),
                       let sourceVideoTrack = asset.tracks(withMediaType: .video).first else {
                     continue
                 }
+                if let colorProperties = videoColorProperties(for: sourceVideoTrack),
+                   preferredColorProperties == nil || colorProperties.isHDR {
+                    preferredColorProperties = colorProperties
+                }
 
-                let start = CMTime(seconds: item.configuration.trim.lowerBound, preferredTimescale: 600)
-                let durationSeconds = max(item.configuration.trim.upperBound - item.configuration.trim.lowerBound, 0.1)
+                let loadedDuration = try? await asset.load(.duration)
+                let sourceDuration = loadedDuration?.seconds ?? item.configuration.trim.upperBound
+                let safeSourceDuration = max(sourceDuration, 0.1)
+                let trimStart = min(max(item.configuration.trim.lowerBound, 0), safeSourceDuration - 0.1)
+                let trimEnd = min(
+                    max(item.configuration.trim.upperBound, trimStart + 0.1),
+                    safeSourceDuration
+                )
+                let start = CMTime(seconds: trimStart, preferredTimescale: 600)
+                let durationSeconds = max(trimEnd - trimStart, 0.1)
                 let duration = CMTime(seconds: durationSeconds, preferredTimescale: 600)
                 let timeRange = CMTimeRange(start: start, duration: duration)
 
                 try videoTrack.insertTimeRange(timeRange, of: sourceVideoTrack, at: cursor)
+                if let sourceAudioTrack = asset.tracks(withMediaType: .audio).first {
+                    try? audioTrack?.insertTimeRange(timeRange, of: sourceAudioTrack, at: cursor)
+                }
 
                 let instruction = AVMutableVideoCompositionInstruction()
                 instruction.timeRange = CMTimeRange(start: cursor, duration: duration)
+                instruction.backgroundColor = UIColor.black.cgColor
                 let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
                 let transform = videoTransform(for: sourceVideoTrack, renderSize: renderSize)
                 layerInstruction.setTransform(transform, at: cursor)
@@ -104,6 +137,7 @@ class VideoExportService {
 
                 let instruction = AVMutableVideoCompositionInstruction()
                 instruction.timeRange = CMTimeRange(start: cursor, duration: timeRange.duration)
+                instruction.backgroundColor = UIColor.black.cgColor
                 let layerInstruction = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
                 layerInstruction.setTransform(.identity, at: cursor)
                 instruction.layerInstructions = [layerInstruction]
@@ -120,11 +154,21 @@ class VideoExportService {
         videoComposition.renderScale = 1.0
         videoComposition.frameDuration = CMTime(value: 1, timescale: frameRate)
         videoComposition.instructions = instructions
+        if let preferredColorProperties {
+            videoComposition.colorPrimaries = preferredColorProperties.primaries
+            videoComposition.colorTransferFunction = preferredColorProperties.transferFunction
+            videoComposition.colorYCbCrMatrix = preferredColorProperties.yCbCrMatrix
+        }
+
+        let exportPreset = preferredColorProperties?.isHDR == true
+            ? AVAssetExportPresetHEVCHighestQuality
+            : AVAssetExportPresetHighestQuality
 
         do {
             return try await runExport(
                 composition: composition,
                 videoComposition: videoComposition,
+                presetName: exportPreset,
                 preferredType: .mp4,
                 fileExtension: "mp4"
             )
@@ -137,6 +181,7 @@ class VideoExportService {
                     return try await runExport(
                         composition: composition,
                         videoComposition: videoComposition,
+                        presetName: exportPreset,
                         preferredType: .mov,
                         fileExtension: "mov"
                     )
@@ -144,6 +189,7 @@ class VideoExportService {
                     return try await runExport(
                         composition: composition,
                         videoComposition: nil,
+                        presetName: AVAssetExportPresetHighestQuality,
                         preferredType: .mov,
                         fileExtension: "mov"
                     )
@@ -191,6 +237,7 @@ class VideoExportService {
     private func runExport(
         composition: AVMutableComposition,
         videoComposition: AVMutableVideoComposition?,
+        presetName: String,
         preferredType: AVFileType,
         fileExtension: String
     ) async throws -> URL {
@@ -201,7 +248,7 @@ class VideoExportService {
 
         guard let exportSession = AVAssetExportSession(
             asset: composition,
-            presetName: AVAssetExportPresetHighestQuality
+            presetName: presetName
         ) else {
             throw VideoExportError.exportFailed(status: nil, underlying: nil)
         }
@@ -334,7 +381,7 @@ class VideoExportService {
                 continue
             }
 
-            let durationSeconds = max(item.configuration.displayDuration, 0.5)
+            let durationSeconds = max(item.effectiveDuration, 0.5)
             let frameCount = max(Int(durationSeconds * Double(frameRate)), 1)
 
             for frame in 0..<frameCount {
@@ -366,6 +413,10 @@ class VideoExportService {
     }
 
     private func makePixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
+        guard let frameImage = renderedStillFrame(from: image, size: size).cgImage else {
+            return nil
+        }
+
         let attrs: [String: Any] = [
             kCVPixelBufferCGImageCompatibilityKey as String: true,
             kCVPixelBufferCGBitmapContextCompatibilityKey as String: true
@@ -397,34 +448,70 @@ class VideoExportService {
             return nil
         }
 
-        context.clear(CGRect(origin: .zero, size: size))
+        context.setFillColor(UIColor.black.cgColor)
+        context.fill(CGRect(origin: .zero, size: size))
 
-        guard let cgImage = image.cgImage else { return nil }
-        let imageSize = CGSize(width: cgImage.width, height: cgImage.height)
-        let scale = max(size.width / imageSize.width, size.height / imageSize.height)
-        let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
-        let origin = CGPoint(
-            x: (size.width - scaledSize.width) / 2,
-            y: (size.height - scaledSize.height) / 2
-        )
-
-        context.draw(cgImage, in: CGRect(origin: origin, size: scaledSize))
+        context.interpolationQuality = .high
+        context.draw(frameImage, in: CGRect(origin: .zero, size: size))
 
         return buffer
     }
 
+    private func renderedStillFrame(from image: UIImage, size: CGSize) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+
+        return UIGraphicsImageRenderer(size: size, format: format).image { context in
+            UIColor.black.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+
+            let imageSize = image.size
+            guard imageSize.width > 0, imageSize.height > 0 else { return }
+
+            let scale = min(size.width / imageSize.width, size.height / imageSize.height)
+            let scaledSize = CGSize(width: imageSize.width * scale, height: imageSize.height * scale)
+            let origin = CGPoint(
+                x: (size.width - scaledSize.width) / 2,
+                y: (size.height - scaledSize.height) / 2
+            )
+            image.draw(in: CGRect(origin: origin, size: scaledSize))
+        }
+    }
+
+    private func videoColorProperties(for track: AVAssetTrack) -> VideoColorProperties? {
+        guard let rawFormatDescription = track.formatDescriptions.first,
+              let extensions = CMFormatDescriptionGetExtensions(rawFormatDescription as! CMFormatDescription) as NSDictionary?,
+              let primaries = extensions[kCMFormatDescriptionExtension_ColorPrimaries] as? String,
+              let transferFunction = extensions[kCMFormatDescriptionExtension_TransferFunction] as? String,
+              let yCbCrMatrix = extensions[kCMFormatDescriptionExtension_YCbCrMatrix] as? String else {
+            return nil
+        }
+
+        return VideoColorProperties(
+            primaries: primaries,
+            transferFunction: transferFunction,
+            yCbCrMatrix: yCbCrMatrix
+        )
+    }
+
     private func videoTransform(for track: AVAssetTrack, renderSize: CGSize) -> CGAffineTransform {
         let preferred = track.preferredTransform
-        let natural = track.naturalSize.applying(preferred)
-        let width = abs(natural.width)
-        let height = abs(natural.height)
+        let transformedRect = CGRect(origin: .zero, size: track.naturalSize).applying(preferred)
+        let width = abs(transformedRect.width)
+        let height = abs(transformedRect.height)
 
-        let scale = max(renderSize.width / width, renderSize.height / height)
+        let scale = min(renderSize.width / width, renderSize.height / height)
         let scaledSize = CGSize(width: width * scale, height: height * scale)
         let translateX = (renderSize.width - scaledSize.width) / 2
         let translateY = (renderSize.height - scaledSize.height) / 2
+        let normalize = CGAffineTransform(
+            translationX: -transformedRect.minX,
+            y: -transformedRect.minY
+        )
 
         return preferred
+            .concatenating(normalize)
             .concatenating(CGAffineTransform(scaleX: scale, y: scale))
             .concatenating(CGAffineTransform(translationX: translateX, y: translateY))
     }

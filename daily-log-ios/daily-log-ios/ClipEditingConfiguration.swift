@@ -15,6 +15,57 @@ struct ClipEditingConfiguration: Codable, Equatable {
     var playback: Playback = .init()
     var crop: Crop = .init()
     var adjusts: Adjusts = .init()
+    var livePhotoMode: LivePhotoMode = .photo
+
+    init(
+        trim: Trim,
+        displayDuration: TimeInterval,
+        playback: Playback = .init(),
+        crop: Crop = .init(),
+        adjusts: Adjusts = .init(),
+        livePhotoMode: LivePhotoMode = .photo
+    ) {
+        self.trim = trim
+        self.displayDuration = displayDuration
+        self.playback = playback
+        self.crop = crop
+        self.adjusts = adjusts
+        self.livePhotoMode = livePhotoMode
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        trim = try container.decode(Trim.self, forKey: .trim)
+        displayDuration = try container.decode(TimeInterval.self, forKey: .displayDuration)
+        playback = try container.decodeIfPresent(Playback.self, forKey: .playback) ?? .init()
+        crop = try container.decodeIfPresent(Crop.self, forKey: .crop) ?? .init()
+        adjusts = try container.decodeIfPresent(Adjusts.self, forKey: .adjusts) ?? .init()
+        livePhotoMode = try container.decodeIfPresent(LivePhotoMode.self, forKey: .livePhotoMode) ?? .photo
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(trim, forKey: .trim)
+        try container.encode(displayDuration, forKey: .displayDuration)
+        try container.encode(playback, forKey: .playback)
+        try container.encode(crop, forKey: .crop)
+        try container.encode(adjusts, forKey: .adjusts)
+        try container.encode(livePhotoMode, forKey: .livePhotoMode)
+    }
+
+    enum LivePhotoMode: String, Codable, Equatable {
+        case photo
+        case video
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case trim
+        case displayDuration
+        case playback
+        case crop
+        case adjusts
+        case livePhotoMode
+    }
 
     struct Trim: Codable, Equatable {
         var lowerBound: TimeInterval

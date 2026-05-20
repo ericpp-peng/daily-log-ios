@@ -14,6 +14,7 @@ import UIKit
 struct ClipThumbnailStrip: View {
     let asset: MediaAsset
     var thumbnailCount: Int = 8
+    var prefersVideo: Bool = false
 
     @State private var thumbnails: [UIImage] = []
     @State private var isLoading: Bool = false
@@ -36,7 +37,7 @@ struct ClipThumbnailStrip: View {
 
             if isLoading && thumbnails.isEmpty {
                 ProgressView().scaleEffect(0.7)
-            } else if asset.type == .video {
+            } else if shouldLoadVideoFrames {
                 videoStrip(width: width, height: height)
             } else if let image = thumbnails.first {
                 Image(uiImage: image)
@@ -65,14 +66,18 @@ struct ClipThumbnailStrip: View {
     // MARK: - Loading
 
     private var thumbnailRequestID: String {
-        "\(asset.id)-\(thumbnailCount)"
+        "\(asset.id)-\(thumbnailCount)-\(shouldLoadVideoFrames)"
+    }
+
+    private var shouldLoadVideoFrames: Bool {
+        asset.type == .video || (asset.type == .livePhoto && prefersVideo)
     }
 
     private func loadThumbnails() async {
         isLoading = true
         defer { isLoading = false }
 
-        if asset.type == .video {
+        if shouldLoadVideoFrames {
             await loadVideoThumbnails()
         } else {
             await loadPhotoThumbnail()

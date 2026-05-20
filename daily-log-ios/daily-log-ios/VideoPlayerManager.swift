@@ -52,6 +52,7 @@ final class VideoPlayerManager {
     private var loadGeneration: Int = 0
 
     init() {
+        configureAudioSession()
         configurePlayerObservers()
     }
 
@@ -86,7 +87,7 @@ final class VideoPlayerManager {
     func play() {
         guard !items.isEmpty else { return }
         isPlaying = true
-        if currentItem?.asset.type == .video {
+        if currentItem?.usesVideoPlayback == true {
             player.play()
         } else {
             startPhotoTimerIfNeeded()
@@ -119,7 +120,7 @@ final class VideoPlayerManager {
         if index != currentIndex {
             currentIndex = index
             Task { await activateCurrentClip(resetSeek: false, localSeek: localTime) }
-        } else if currentItem?.asset.type == .video {
+        } else if currentItem?.usesVideoPlayback == true {
             let cmTime = CMTime(seconds: localTime + (currentItem?.configuration.trim.lowerBound ?? 0),
                                 preferredTimescale: 600)
             player.seek(to: cmTime, toleranceBefore: .zero, toleranceAfter: .zero)
@@ -146,8 +147,7 @@ final class VideoPlayerManager {
             globalTime = cumulativeStartTimes[safe: currentIndex] ?? 0
         }
 
-        switch item.asset.type {
-        case .video:
+        if item.usesVideoPlayback {
             currentImage = nil
             let asset = await PhotoLibraryService.shared.requestAVAsset(for: item.asset)
             guard generation == loadGeneration else { return }
@@ -161,7 +161,7 @@ final class VideoPlayerManager {
             } else {
                 player.replaceCurrentItem(with: nil)
             }
-        case .image, .livePhoto, .unknown:
+        } else {
             player.replaceCurrentItem(with: nil)
             let image = await PhotoLibraryService.shared.requestPreviewImage(
                 for: item.asset,
@@ -178,21 +178,34 @@ final class VideoPlayerManager {
     // MARK: - Advancement
 
     private func advanceToNextClip() {
+        guard isPlaying, !isLoadingClip else { return }
+
         photoTimerTask?.cancel()
         photoTimerTask = nil
 
         guard currentIndex + 1 < items.count else {
-            pause()
-            globalTime = totalDuration
+            resetCurrentClipToStartAfterPlayback()
             return
         }
+        isLoadingClip = true
         currentIndex += 1
         globalTime = cumulativeStartTimes[safe: currentIndex] ?? 0
         Task { await activateCurrentClip(resetSeek: true) }
     }
 
+    private func resetCurrentClipToStartAfterPlayback() {
+        pause()
+
+        let startTime = cumulativeStartTimes[safe: currentIndex] ?? 0
+        globalTime = startTime
+
+        guard let item = currentItem, item.usesVideoPlayback else { return }
+        let trimStart = CMTime(seconds: item.configuration.trim.lowerBound, preferredTimescale: 600)
+        player.seek(to: trimStart, toleranceBefore: .zero, toleranceAfter: .zero)
+    }
+
     private func startPhotoTimerIfNeeded(remainingOverride: TimeInterval? = nil) {
-        guard let item = currentItem, item.asset.type != .video else { return }
+        guard let item = currentItem, !item.usesVideoPlayback else { return }
         let duration = remainingOverride ?? item.effectiveDuration
         guard duration > 0 else { advanceToNextClip(); return }
 
@@ -224,14 +237,30 @@ final class VideoPlayerManager {
 
     // MARK: - Player observers
 
+    private func configureAudioSession() {
+        do {
+            try AVAudioSession.sharedInstance().setCategory(.playback, mode: .moviePlayback)
+            try AVAudioSession.sharedInstance().setActive(true)
+        } catch {
+            // Keep playback usable even if the audio session cannot be promoted.
+        }
+    }
+
     private func configurePlayerObservers() {
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: nil,
             queue: .main
-        ) { [weak self] _ in
+        ) { [weak self] notification in
             Task { @MainActor in
-                self?.advanceToNextClip()
+                guard let self,
+                      self.isPlaying,
+                      !self.isLoadingClip,
+                      let endedItem = notification.object as? AVPlayerItem,
+                      endedItem === self.player.currentItem else {
+                    return
+                }
+                self.advanceToNextClip()
             }
         }
 
@@ -239,8 +268,10 @@ final class VideoPlayerManager {
         timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
             Task { @MainActor in
                 guard let self,
+                      self.isPlaying,
+                      !self.isLoadingClip,
                       let item = self.currentItem,
-                      item.asset.type == .video else { return }
+                      item.usesVideoPlayback else { return }
                 let local = max(0, time.seconds - item.configuration.trim.lowerBound)
                 let base = self.cumulativeStartTimes[safe: self.currentIndex] ?? 0
                 self.globalTime = base + min(local, item.effectiveDuration)

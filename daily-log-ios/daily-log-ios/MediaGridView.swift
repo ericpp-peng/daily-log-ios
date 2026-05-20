@@ -10,7 +10,11 @@ struct MediaGridView: View {
     let date: Date
     let viewModel: MediaSelectionViewModel
 
-    private let columns = [GridItem(.adaptive(minimum: 112), spacing: 2)]
+    private let gridSpacing: CGFloat = 2
+    private let columns = Array(
+        repeating: GridItem(.flexible(minimum: 0), spacing: 2),
+        count: 3
+    )
 
     private var dateTitle: String {
         let calendar = Calendar.current
@@ -129,6 +133,7 @@ struct MediaGridView: View {
                     }
                 }
             }
+            .padding(.top, gridSpacing)
         }
     }
 
@@ -205,63 +210,103 @@ struct ThumbnailCell: View {
     private let thumbSize = CGSize(width: 224, height: 224)
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            // Image
-            Group {
-                if let thumbnail {
-                    Image(uiImage: thumbnail)
-                        .resizable()
-                        .scaledToFill()
-                } else {
-                    Color(.systemGray5)
-                        .overlay(ProgressView().scaleEffect(0.6))
+        GeometryReader { proxy in
+            let side = min(proxy.size.width, proxy.size.height)
+
+            Button(action: onTap) {
+                ZStack {
+                    thumbnailContent
+                        .frame(width: side, height: side)
+                        .clipped()
+
+                    if asset.isSelected {
+                        Color.orange.opacity(0.25)
+                    }
                 }
+                .overlay(alignment: .bottomLeading) {
+                    timestampBadge
+                }
+                .overlay(alignment: .bottomTrailing) {
+                    durationBadge
+                }
+                .overlay(alignment: .topLeading) {
+                    orientationBadge
+                }
+                .overlay(alignment: .topTrailing) {
+                    selectionBadge
+                }
+                .frame(width: side, height: side)
+                .clipped()
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(1, contentMode: .fill)
-            .clipped()
-
-            // Timestamp
-            if let date = asset.creationDate ?? asset.modificationDate {
-                Text(timeString(from: date))
-                    .font(.caption2)
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 2)
-                    .background(Color.black.opacity(0.5))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .padding(5)
-            }
-
-            // Video duration badge (bottom trailing)
-            if asset.type == .video, let duration = asset.duration {
-                Text(formatDuration(duration))
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 2)
-                    .background(Color.black.opacity(0.6))
-                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                    .frame(maxWidth: .infinity, alignment: .trailing)
-                    .padding(5)
-            }
-
-            // Selection tint
-            if asset.isSelected {
-                Color.orange.opacity(0.25)
-            }
+            .buttonStyle(.plain)
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
-        .overlay(alignment: .topTrailing) {
-            selectionBadge
-        }
+        .aspectRatio(1, contentMode: .fit)
+        .clipped()
         .contentShape(Rectangle())
-        .onTapGesture(perform: onTap)
         .task(id: asset.id) {
-            thumbnail = await PhotoLibraryService.shared.requestThumbnail(
+            thumbnail = await PhotoLibraryService.shared.requestPreviewImage(
                 for: asset,
                 targetSize: thumbSize
             )
         }
+    }
+
+    @ViewBuilder
+    private var thumbnailContent: some View {
+        if let thumbnail {
+            Image(uiImage: thumbnail)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Color.black)
+        } else {
+            Color(.systemGray5)
+                .overlay(ProgressView().scaleEffect(0.6))
+        }
+    }
+
+    @ViewBuilder
+    private var timestampBadge: some View {
+        if let date = asset.creationDate ?? asset.modificationDate {
+            Text(timeString(from: date))
+                .font(.caption2)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.5))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .padding(5)
+        }
+    }
+
+    @ViewBuilder
+    private var durationBadge: some View {
+        if asset.type == .video, let duration = asset.duration {
+            Text(formatDuration(duration))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color.black.opacity(0.6))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .padding(5)
+        }
+    }
+
+    private var orientationBadge: some View {
+        Image(systemName: orientationIconName)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(.white)
+            .frame(width: 22, height: 18)
+            .background(Color.black.opacity(0.55))
+            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .padding(5)
+    }
+
+    private var orientationIconName: String {
+        asset.phAsset.pixelWidth >= asset.phAsset.pixelHeight ? "rectangle" : "rectangle.portrait"
     }
 
     private var selectionBadge: some View {

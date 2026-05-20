@@ -19,7 +19,7 @@ struct ClipTrimView: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
-            if item.asset.type == .video {
+            if item.usesVideoPlayback {
                 videoBody
             } else {
                 photoBody
@@ -38,7 +38,7 @@ struct ClipTrimView: View {
             Image(systemName: "scissors")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.orange)
-            Text(item.asset.type == .video ? "Trim clip" : "Photo duration")
+            Text(item.usesVideoPlayback ? "Trim clip" : "Photo duration")
                 .font(.subheadline.weight(.semibold))
             Spacer()
             Text(item.durationString)
@@ -51,10 +51,14 @@ struct ClipTrimView: View {
 
     @ViewBuilder
     private var videoBody: some View {
-        let sourceDuration = max(item.asset.duration ?? TimelineViewModel.defaultMaxVideoDuration, 0.5)
+        let sourceDuration = max(item.asset.duration ?? item.configuration.trim.upperBound, 0.5)
 
         ZStack {
-            ClipThumbnailStrip(asset: item.asset, thumbnailCount: 8)
+            ClipThumbnailStrip(
+                asset: item.asset,
+                thumbnailCount: 8,
+                prefersVideo: item.usesVideoPlayback
+            )
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             DualHandleRangeSlider(
                 lowerBound: trimLowerBinding(sourceDuration: sourceDuration),

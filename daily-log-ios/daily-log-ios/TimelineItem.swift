@@ -26,8 +26,12 @@ struct TimelineItem: Identifiable {
         Self.formatTime(effectiveDuration)
     }
 
+    var usesVideoPlayback: Bool {
+        asset.type == .video || (asset.type == .livePhoto && configuration.livePhotoMode == .video)
+    }
+
     var effectiveDuration: TimeInterval {
-        if asset.type == .video {
+        if usesVideoPlayback {
             let rawTrim = max(0, configuration.trim.upperBound - configuration.trim.lowerBound)
             let rate = max(configuration.playback.rate, 0.01)
             return rawTrim / rate
@@ -36,7 +40,7 @@ struct TimelineItem: Identifiable {
     }
 
     var trimRangeString: String {
-        guard asset.type == .video else { return durationString }
+        guard usesVideoPlayback else { return durationString }
         return "\(Self.formatTime(configuration.trim.lowerBound)) - \(Self.formatTime(configuration.trim.upperBound))"
     }
 

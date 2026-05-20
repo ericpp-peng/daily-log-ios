@@ -116,13 +116,13 @@ class PhotoLibraryService {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
-            options.resizeMode = .exact
+            options.resizeMode = .fast
             options.isNetworkAccessAllowed = true
 
             PHImageManager.default().requestImage(
                 for: asset.phAsset,
                 targetSize: targetSize,
-                contentMode: .aspectFill,
+                contentMode: .aspectFit,
                 options: options
             ) { image, _ in
                 continuation.resume(returning: image)
@@ -147,6 +147,10 @@ class PhotoLibraryService {
     }
 
     func requestAVAsset(for asset: MediaAsset) async -> AVAsset? {
+        if asset.type == .livePhoto {
+            return await requestLivePhotoPairedVideoAsset(for: asset)
+        }
+
         guard asset.type == .video else { return nil }
         return await withCheckedContinuation { continuation in
             let options = PHVideoRequestOptions()
@@ -162,7 +166,77 @@ class PhotoLibraryService {
         }
     }
 
+    func requestVideoDuration(for asset: MediaAsset) async -> TimeInterval? {
+        if asset.type == .video {
+            return asset.duration
+        }
+
+        guard asset.type == .livePhoto,
+              let avAsset = await requestAVAsset(for: asset),
+              let duration = try? await avAsset.load(.duration),
+              duration.seconds.isFinite,
+              duration.seconds > 0 else {
+            return nil
+        }
+
+        return duration.seconds
+    }
+
     // MARK: - Private
+
+    private func requestLivePhotoPairedVideoAsset(for asset: MediaAsset) async -> AVAsset? {
+        guard let resource = PHAssetResource
+            .assetResources(for: asset.phAsset)
+            .first(where: { $0.type == .pairedVideo }) else {
+            return nil
+        }
+
+        let fileURL = livePhotoPairedVideoURL(for: asset, resource: resource)
+        if FileManager.default.fileExists(atPath: fileURL.path) {
+            return AVURLAsset(url: fileURL)
+        }
+
+        return await withCheckedContinuation { continuation in
+            let options = PHAssetResourceRequestOptions()
+            options.isNetworkAccessAllowed = true
+
+            do {
+                try FileManager.default.createDirectory(
+                    at: fileURL.deletingLastPathComponent(),
+                    withIntermediateDirectories: true
+                )
+            } catch {
+                continuation.resume(returning: nil)
+                return
+            }
+
+            PHAssetResourceManager.default().writeData(
+                for: resource,
+                toFile: fileURL,
+                options: options
+            ) { error in
+                if error != nil {
+                    continuation.resume(returning: nil)
+                } else {
+                    continuation.resume(returning: AVURLAsset(url: fileURL))
+                }
+            }
+        }
+    }
+
+    private func livePhotoPairedVideoURL(for asset: MediaAsset, resource: PHAssetResource) -> URL {
+        let safeIdentifier = asset.localIdentifier.replacingOccurrences(
+            of: "[^A-Za-z0-9_-]",
+            with: "_",
+            options: .regularExpression
+        )
+        let ext = (resource.originalFilename as NSString).pathExtension
+        let fileExtension = ext.isEmpty ? "mov" : ext
+
+        return FileManager.default.temporaryDirectory
+            .appendingPathComponent("DailyLogLivePhotoVideos", isDirectory: true)
+            .appendingPathComponent("\(safeIdentifier).\(fileExtension)")
+    }
 
     private func mapStatus(_ status: PHAuthorizationStatus) -> PhotoAuthorizationStatus {
         switch status {

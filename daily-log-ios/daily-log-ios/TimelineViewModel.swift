@@ -75,7 +75,8 @@ final class TimelineViewModel {
                 lowerBound: 0,
                 upperBound: isVideo ? maxDuration : defaultDuration
             ),
-            displayDuration: defaultDuration
+            displayDuration: defaultDuration,
+            livePhotoMode: .photo
         )
     }
 
