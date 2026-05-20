@@ -67,21 +67,21 @@ final class TimelineViewModel {
     // MARK: - Configuration factory
 
     static func makeInitialConfiguration(for asset: MediaAsset) -> ClipEditingConfiguration {
-        let isVideo = asset.type == .video
+        let isVideoPlayback = asset.type == .video || asset.type == .livePhoto
         let maxDuration = maxVideoDuration(for: asset)
         let defaultDuration = defaultDuration(for: asset)
         return ClipEditingConfiguration(
             trim: .init(
                 lowerBound: 0,
-                upperBound: isVideo ? maxDuration : defaultDuration
+                upperBound: isVideoPlayback ? maxDuration : defaultDuration
             ),
             displayDuration: defaultDuration,
-            livePhotoMode: .photo
+            livePhotoMode: asset.type == .livePhoto ? .video : .photo
         )
     }
 
     static func defaultDuration(for asset: MediaAsset) -> TimeInterval {
-        if asset.type == .video {
+        if asset.type == .video || asset.type == .livePhoto {
             let maxDuration = maxVideoDuration(for: asset)
             return max(minVideoDuration, min(maxDuration, defaultMaxVideoDuration))
         }

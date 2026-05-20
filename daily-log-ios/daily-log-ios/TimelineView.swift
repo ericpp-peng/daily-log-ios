@@ -37,8 +37,8 @@ struct TimelineView: View {
             Divider()
 
             List {
-                ForEach(viewModel.items) { item in
-                    TimelineItemRow(item: item)
+                ForEach($viewModel.items) { $item in
+                    TimelineItemRow(item: $item)
                 }
                 .onDelete(perform: viewModel.remove)
                 .onMove(perform: viewModel.move)
@@ -85,7 +85,12 @@ struct TimelineView: View {
                         .foregroundStyle(.secondary)
                 }
                 Spacer()
-                NavigationLink(destination: EditorView(initialAssets: viewModel.items.map(\.asset))) {
+                NavigationLink(
+                    destination: EditorView(
+                        initialItems: viewModel.items,
+                        initialProject: viewModel.project
+                    )
+                ) {
                     HStack(spacing: 6) {
                         Text("Edit")
                             .font(.body.weight(.semibold))
@@ -111,7 +116,7 @@ struct TimelineView: View {
 // MARK: - TimelineItemRow
 
 private struct TimelineItemRow: View {
-    let item: TimelineItem
+    @Binding var item: TimelineItem
     @State private var thumbnail: UIImage?
 
     var body: some View {
@@ -144,6 +149,17 @@ private struct TimelineItemRow: View {
                         .foregroundStyle(.secondary)
                 }
             }
+            .frame(width: 96, alignment: .leading)
+
+            TextField("Note", text: $item.configuration.timestampNote)
+                .font(.subheadline)
+                .textInputAutocapitalization(.sentences)
+                .autocorrectionDisabled()
+                .submitLabel(.done)
+                .padding(.horizontal, 12)
+                .frame(height: 40)
+                .background(Color(.secondarySystemBackground))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
             Spacer()
         }

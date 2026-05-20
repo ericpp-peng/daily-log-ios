@@ -99,7 +99,7 @@ struct HomeView: View {
     }
 
     private func open(_ date: Date) {
-        viewModel.assets = []
+        viewModel.resetSelection()
         viewModel.filter = .all
         navigateTo = date
     }

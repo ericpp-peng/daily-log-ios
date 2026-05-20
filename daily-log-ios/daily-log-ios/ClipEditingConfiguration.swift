@@ -16,6 +16,7 @@ struct ClipEditingConfiguration: Codable, Equatable {
     var crop: Crop = .init()
     var adjusts: Adjusts = .init()
     var livePhotoMode: LivePhotoMode = .photo
+    var timestampNote: String = ""
 
     init(
         trim: Trim,
@@ -23,7 +24,8 @@ struct ClipEditingConfiguration: Codable, Equatable {
         playback: Playback = .init(),
         crop: Crop = .init(),
         adjusts: Adjusts = .init(),
-        livePhotoMode: LivePhotoMode = .photo
+        livePhotoMode: LivePhotoMode = .photo,
+        timestampNote: String = ""
     ) {
         self.trim = trim
         self.displayDuration = displayDuration
@@ -31,6 +33,7 @@ struct ClipEditingConfiguration: Codable, Equatable {
         self.crop = crop
         self.adjusts = adjusts
         self.livePhotoMode = livePhotoMode
+        self.timestampNote = timestampNote
     }
 
     init(from decoder: Decoder) throws {
@@ -41,6 +44,7 @@ struct ClipEditingConfiguration: Codable, Equatable {
         crop = try container.decodeIfPresent(Crop.self, forKey: .crop) ?? .init()
         adjusts = try container.decodeIfPresent(Adjusts.self, forKey: .adjusts) ?? .init()
         livePhotoMode = try container.decodeIfPresent(LivePhotoMode.self, forKey: .livePhotoMode) ?? .photo
+        timestampNote = try container.decodeIfPresent(String.self, forKey: .timestampNote) ?? ""
     }
 
     func encode(to encoder: Encoder) throws {
@@ -51,6 +55,7 @@ struct ClipEditingConfiguration: Codable, Equatable {
         try container.encode(crop, forKey: .crop)
         try container.encode(adjusts, forKey: .adjusts)
         try container.encode(livePhotoMode, forKey: .livePhotoMode)
+        try container.encode(timestampNote, forKey: .timestampNote)
     }
 
     enum LivePhotoMode: String, Codable, Equatable {
@@ -65,6 +70,7 @@ struct ClipEditingConfiguration: Codable, Equatable {
         case crop
         case adjusts
         case livePhotoMode
+        case timestampNote
     }
 
     struct Trim: Codable, Equatable {

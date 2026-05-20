@@ -42,6 +42,12 @@ class VideoExportService {
     private let renderSize = CGSize(width: 1080, height: 1920)
     private let frameRate: Int32 = 30
 
+    private struct TimestampSegment {
+        let text: String
+        let start: CMTime
+        let duration: CMTime
+    }
+
     private struct VideoColorProperties {
         let primaries: String
         let transferFunction: String
@@ -54,11 +60,14 @@ class VideoExportService {
         }
     }
 
-    func export(items: [TimelineItem]) async throws -> URL {
+    func export(
+        items: [TimelineItem],
+        timestamp: ProjectEditingConfiguration.Timestamp = .init()
+    ) async throws -> URL {
         guard !items.isEmpty else { throw VideoExportError.noItems }
 
         if items.allSatisfy({ !$0.usesVideoPlayback }) {
-            return try await exportStillsOnly(items: items)
+            return try await exportStillsOnly(items: items, timestamp: timestamp)
         }
 
         let composition = AVMutableComposition()
@@ -73,6 +82,7 @@ class VideoExportService {
             preferredTrackID: kCMPersistentTrackID_Invalid
         )
         var instructions: [AVMutableVideoCompositionInstruction] = []
+        var timestampSegments: [TimestampSegment] = []
         var cursor = CMTime.zero
         var preferredColorProperties: VideoColorProperties?
 
@@ -113,6 +123,14 @@ class VideoExportService {
                 layerInstruction.setTransform(transform, at: cursor)
                 instruction.layerInstructions = [layerInstruction]
                 instructions.append(instruction)
+                if let segment = timestampSegment(
+                    for: item,
+                    start: cursor,
+                    duration: duration,
+                    style: timestamp
+                ) {
+                    timestampSegments.append(segment)
+                }
 
                 cursor = cursor + duration
             } else {
@@ -142,6 +160,14 @@ class VideoExportService {
                 layerInstruction.setTransform(.identity, at: cursor)
                 instruction.layerInstructions = [layerInstruction]
                 instructions.append(instruction)
+                if let segment = timestampSegment(
+                    for: item,
+                    start: cursor,
+                    duration: timeRange.duration,
+                    style: timestamp
+                ) {
+                    timestampSegments.append(segment)
+                }
 
                 cursor = cursor + timeRange.duration
             }
@@ -158,6 +184,13 @@ class VideoExportService {
             videoComposition.colorPrimaries = preferredColorProperties.primaries
             videoComposition.colorTransferFunction = preferredColorProperties.transferFunction
             videoComposition.colorYCbCrMatrix = preferredColorProperties.yCbCrMatrix
+        }
+        if timestamp.enabled {
+            videoComposition.animationTool = timestampAnimationTool(
+                for: timestampSegments,
+                style: timestamp,
+                renderSize: renderSize
+            )
         }
 
         let exportPreset = preferredColorProperties?.isHDR == true
@@ -337,7 +370,10 @@ class VideoExportService {
         return outputURL
     }
 
-    private func exportStillsOnly(items: [TimelineItem]) async throws -> URL {
+    private func exportStillsOnly(
+        items: [TimelineItem],
+        timestamp: ProjectEditingConfiguration.Timestamp
+    ) async throws -> URL {
         let outputURL = makeTemporaryURL(fileExtension: "mov")
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
 
@@ -377,7 +413,12 @@ class VideoExportService {
                 for: item.asset,
                 targetSize: renderSize
             ),
-            let buffer = makePixelBuffer(from: image, size: renderSize) else {
+            let buffer = makePixelBuffer(
+                from: image,
+                size: renderSize,
+                timestampText: timestamp.enabled ? timestampText(for: item, style: timestamp) : nil,
+                timestampStyle: timestamp
+            ) else {
                 continue
             }
 
@@ -412,8 +453,18 @@ class VideoExportService {
         }
     }
 
-    private func makePixelBuffer(from image: UIImage, size: CGSize) -> CVPixelBuffer? {
-        guard let frameImage = renderedStillFrame(from: image, size: size).cgImage else {
+    private func makePixelBuffer(
+        from image: UIImage,
+        size: CGSize,
+        timestampText: String? = nil,
+        timestampStyle: ProjectEditingConfiguration.Timestamp = .init()
+    ) -> CVPixelBuffer? {
+        guard let frameImage = renderedStillFrame(
+            from: image,
+            size: size,
+            timestampText: timestampText,
+            timestampStyle: timestampStyle
+        ).cgImage else {
             return nil
         }
 
@@ -457,7 +508,12 @@ class VideoExportService {
         return buffer
     }
 
-    private func renderedStillFrame(from image: UIImage, size: CGSize) -> UIImage {
+    private func renderedStillFrame(
+        from image: UIImage,
+        size: CGSize,
+        timestampText: String? = nil,
+        timestampStyle: ProjectEditingConfiguration.Timestamp = .init()
+    ) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true
@@ -476,6 +532,181 @@ class VideoExportService {
                 y: (size.height - scaledSize.height) / 2
             )
             image.draw(in: CGRect(origin: origin, size: scaledSize))
+
+            if let timestampText {
+                drawTimestamp(
+                    timestampText,
+                    style: timestampStyle,
+                    in: CGRect(origin: .zero, size: size)
+                )
+            }
+        }
+    }
+
+    private func timestampSegment(
+        for item: TimelineItem,
+        start: CMTime,
+        duration: CMTime,
+        style: ProjectEditingConfiguration.Timestamp
+    ) -> TimestampSegment? {
+        guard let text = timestampText(for: item, style: style) else { return nil }
+        return TimestampSegment(text: text, start: start, duration: duration)
+    }
+
+    private func timestampText(for item: TimelineItem) -> String? {
+        guard let date = item.captureTime else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        return formatter.string(from: date)
+    }
+
+    private func timestampText(
+        for item: TimelineItem,
+        style: ProjectEditingConfiguration.Timestamp
+    ) -> String? {
+        guard let time = timestampText(for: item) else { return nil }
+        let note = item.configuration.timestampNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty else { return time }
+        return "\(time)  \(note)"
+    }
+
+    private func timestampAnimationTool(
+        for segments: [TimestampSegment],
+        style: ProjectEditingConfiguration.Timestamp,
+        renderSize: CGSize
+    ) -> AVVideoCompositionCoreAnimationTool? {
+        guard !segments.isEmpty else { return nil }
+
+        let videoLayer = CALayer()
+        videoLayer.frame = CGRect(origin: .zero, size: renderSize)
+
+        let parentLayer = CALayer()
+        parentLayer.frame = CGRect(origin: .zero, size: renderSize)
+        parentLayer.isGeometryFlipped = true
+        parentLayer.addSublayer(videoLayer)
+
+        for segment in segments {
+            let timestampLayer = makeTimestampLayer(
+                text: segment.text,
+                style: style,
+                renderSize: renderSize
+            )
+            timestampLayer.opacity = 0
+
+            let fade = CAKeyframeAnimation(keyPath: "opacity")
+            fade.beginTime = AVCoreAnimationBeginTimeAtZero + segment.start.seconds
+            fade.duration = max(segment.duration.seconds, 0.01)
+            fade.keyTimes = [0, 0.01, 0.99, 1]
+            fade.values = [0, 1, 1, 0]
+            fade.isRemovedOnCompletion = false
+            fade.fillMode = .both
+            timestampLayer.add(fade, forKey: "clipTimestampOpacity")
+
+            parentLayer.addSublayer(timestampLayer)
+        }
+
+        return AVVideoCompositionCoreAnimationTool(
+            postProcessingAsVideoLayer: videoLayer,
+            in: parentLayer
+        )
+    }
+
+    private func makeTimestampLayer(
+        text: String,
+        style: ProjectEditingConfiguration.Timestamp,
+        renderSize: CGSize
+    ) -> CALayer {
+        let fontSize: CGFloat = 48
+        let horizontalPadding: CGFloat = 28
+        let verticalPadding: CGFloat = 16
+        let margin: CGFloat = 56
+        let textSize = (text as NSString).size(withAttributes: [
+            .font: timestampUIFont(for: style.font, size: fontSize)
+        ])
+        let width = ceil(textSize.width + horizontalPadding * 2)
+        let height = ceil(textSize.height + verticalPadding * 2)
+
+        let container = CALayer()
+        container.frame = CGRect(
+            x: margin,
+            y: renderSize.height - margin - height,
+            width: width,
+            height: height
+        )
+        container.cornerRadius = 18
+        container.backgroundColor = UIColor.black.withAlphaComponent(0.58).cgColor
+        container.masksToBounds = true
+
+        let textLayer = CATextLayer()
+        textLayer.string = text
+        textLayer.foregroundColor = UIColor.white.cgColor
+        textLayer.alignmentMode = .left
+        textLayer.contentsScale = UIScreen.main.scale
+        textLayer.font = timestampUIFont(for: style.font, size: fontSize).fontName as CFTypeRef
+        textLayer.fontSize = fontSize
+        textLayer.frame = CGRect(
+            x: horizontalPadding,
+            y: verticalPadding - 2,
+            width: width - horizontalPadding * 2,
+            height: height - verticalPadding * 2 + 4
+        )
+        container.addSublayer(textLayer)
+
+        return container
+    }
+
+    private func drawTimestamp(
+        _ text: String,
+        style: ProjectEditingConfiguration.Timestamp,
+        in rect: CGRect
+    ) {
+        let fontSize: CGFloat = 48
+        let font = timestampUIFont(for: style.font, size: fontSize)
+        let horizontalPadding: CGFloat = 28
+        let verticalPadding: CGFloat = 16
+        let margin: CGFloat = 56
+        let textSize = (text as NSString).size(withAttributes: [.font: font])
+        let badgeRect = CGRect(
+            x: margin,
+            y: rect.height - margin - ceil(textSize.height + verticalPadding * 2),
+            width: ceil(textSize.width + horizontalPadding * 2),
+            height: ceil(textSize.height + verticalPadding * 2)
+        )
+
+        UIColor.black.withAlphaComponent(0.58).setFill()
+        UIBezierPath(roundedRect: badgeRect, cornerRadius: 18).fill()
+
+        (text as NSString).draw(
+            in: CGRect(
+                x: badgeRect.minX + horizontalPadding,
+                y: badgeRect.minY + verticalPadding - 2,
+                width: badgeRect.width - horizontalPadding * 2,
+                height: badgeRect.height - verticalPadding * 2 + 4
+            ),
+            withAttributes: [
+                .font: font,
+                .foregroundColor: UIColor.white
+            ]
+        )
+    }
+
+    private func timestampUIFont(
+        for font: ProjectEditingConfiguration.Timestamp.FontFace,
+        size: CGFloat
+    ) -> UIFont {
+        switch font {
+        case .system:
+            return .systemFont(ofSize: size, weight: .semibold)
+        case .rounded:
+            let descriptor = UIFont.systemFont(ofSize: size, weight: .semibold).fontDescriptor
+                .withDesign(.rounded) ?? UIFont.systemFont(ofSize: size, weight: .semibold).fontDescriptor
+            return UIFont(descriptor: descriptor, size: size)
+        case .serif:
+            let descriptor = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title2)
+                .withDesign(.serif) ?? UIFontDescriptor.preferredFontDescriptor(withTextStyle: .title2)
+            return UIFont(descriptor: descriptor, size: size)
+        case .monospaced:
+            return .monospacedDigitSystemFont(ofSize: size, weight: .semibold)
         }
     }
 

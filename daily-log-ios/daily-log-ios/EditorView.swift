@@ -10,6 +10,8 @@ struct EditorView: View {
     @Environment(\.dismiss) private var dismiss
 
     let initialAssets: [MediaAsset]
+    let initialItems: [TimelineItem]
+    let initialProject: ProjectEditingConfiguration
 
     @State private var viewModel = TimelineViewModel()
     @State private var playerManager = VideoPlayerManager()
@@ -19,6 +21,24 @@ struct EditorView: View {
     @State private var isExporting = false
     @State private var showExportAlert = false
     @State private var exportMessage = ""
+
+    init(
+        initialAssets: [MediaAsset],
+        initialProject: ProjectEditingConfiguration = .init()
+    ) {
+        self.initialAssets = initialAssets
+        self.initialItems = []
+        self.initialProject = initialProject
+    }
+
+    init(
+        initialItems: [TimelineItem],
+        initialProject: ProjectEditingConfiguration = .init()
+    ) {
+        self.initialAssets = initialItems.map(\.asset)
+        self.initialItems = initialItems
+        self.initialProject = initialProject
+    }
 
     var body: some View {
         @Bindable var bindableViewModel = viewModel
@@ -57,7 +77,12 @@ struct EditorView: View {
         }
         .onAppear {
             if viewModel.items.isEmpty {
-                viewModel.buildTimeline(from: initialAssets)
+                viewModel.project = initialProject
+                if initialItems.isEmpty {
+                    viewModel.buildTimeline(from: initialAssets)
+                } else {
+                    viewModel.items = initialItems
+                }
             }
             playerManager.load(items: viewModel.items)
             if selectedItemId == nil {
@@ -66,6 +91,7 @@ struct EditorView: View {
             if let selectedItemId {
                 playerManager.selectItem(id: selectedItemId)
             }
+            refreshInitialLivePhotoVideoDurations()
         }
         .onDisappear {
             playerManager.pause()
@@ -168,7 +194,7 @@ struct EditorView: View {
     // MARK: - Preview
 
     private var previewSurface: some View {
-        ZStack {
+        ZStack(alignment: .bottomLeading) {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.black)
 
@@ -188,10 +214,46 @@ struct EditorView: View {
                     .font(.system(size: 42))
                     .foregroundStyle(.white.opacity(0.75))
             }
+
+            if viewModel.project.timestamp.enabled,
+               let timestampText = previewTimestampText {
+                Text(timestampText)
+                    .font(timestampPreviewFont)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.black.opacity(0.58))
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .padding(18)
+            }
         }
         .aspectRatio(viewModel.project.canvas.preset.aspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    private var previewTimestampText: String? {
+        guard let clip = currentClip,
+              let date = clip.captureTime else { return nil }
+        let formatter = DateFormatter()
+        formatter.dateFormat = "h:mm a"
+        let time = formatter.string(from: date)
+        let note = clip.configuration.timestampNote.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty else { return time }
+        return "\(time)  \(note)"
+    }
+
+    private var timestampPreviewFont: Font {
+        switch viewModel.project.timestamp.font {
+        case .system:
+            return .caption.weight(.semibold)
+        case .rounded:
+            return .system(.caption, design: .rounded).weight(.semibold)
+        case .serif:
+            return .system(.caption, design: .serif).weight(.semibold)
+        case .monospaced:
+            return .system(.caption, design: .monospaced).weight(.semibold)
+        }
     }
 
     // MARK: - Playback Timeline
@@ -326,9 +388,12 @@ struct EditorView: View {
     }
 
     private var timelineTimeHeader: some View {
-        HStack(spacing: 8) {
-            timeBadge
-            totalDurationBadge
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                timeBadge
+                totalDurationBadge
+                timestampFontMenu
+            }
         }
     }
 
@@ -362,6 +427,42 @@ struct EditorView: View {
                 Capsule()
                     .stroke(.white.opacity(0.1), lineWidth: 1)
             )
+    }
+
+    private var timestampFontMenu: some View {
+        Menu {
+            Toggle(isOn: $viewModel.project.timestamp.enabled) {
+                Label("Show Timestamp", systemImage: "clock")
+            }
+
+            Divider()
+
+            ForEach(ProjectEditingConfiguration.Timestamp.FontFace.allCases, id: \.self) { font in
+                Button {
+                    viewModel.project.timestamp.font = font
+                } label: {
+                    if viewModel.project.timestamp.font == font {
+                        Label(font.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(font.displayName)
+                    }
+                }
+            }
+        } label: {
+            Label(viewModel.project.timestamp.font.displayName, systemImage: "clock")
+                .font(.caption2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .foregroundStyle(.white.opacity(viewModel.project.timestamp.enabled ? 0.9 : 0.45))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 8)
+                .background(.white.opacity(0.06))
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(.white.opacity(0.1), lineWidth: 1)
+                )
+        }
     }
 
     private var timelineFooter: some View {
@@ -480,6 +581,38 @@ struct EditorView: View {
         )
     }
 
+    private func refreshInitialLivePhotoVideoDurations() {
+        let livePhotoItems = viewModel.items.filter {
+            $0.asset.type == .livePhoto && $0.configuration.livePhotoMode == .video
+        }
+        guard !livePhotoItems.isEmpty else { return }
+
+        for item in livePhotoItems {
+            Task {
+                let duration = await PhotoLibraryService.shared.requestVideoDuration(for: item.asset)
+                await MainActor.run {
+                    guard let index = viewModel.items.firstIndex(where: { $0.id == item.id }),
+                          viewModel.items[index].configuration.livePhotoMode == .video,
+                          let duration,
+                          duration > 0 else {
+                        return
+                    }
+
+                    let currentUpper = viewModel.items[index].configuration.trim.upperBound
+                    let isUsingFallbackDuration = abs(currentUpper - TimelineViewModel.defaultMaxVideoDuration) < 0.01
+                    let exceedsActualDuration = currentUpper > duration
+                    guard isUsingFallbackDuration || exceedsActualDuration else { return }
+
+                    applyLivePhotoVideoMode(at: index, sourceDuration: duration)
+                    playerManager.update(items: viewModel.items)
+                    if selectedItemId == item.id {
+                        playerManager.selectItem(id: item.id)
+                    }
+                }
+            }
+        }
+    }
+
     private func refreshPlayerAfterClipModeChange(itemId: String) {
         playerManager.pause()
         playerManager.update(items: viewModel.items)
@@ -524,7 +657,10 @@ struct EditorView: View {
                 throw VideoExportError.saveFailed(underlying: nil)
             }
 
-            let url = try await VideoExportService.shared.export(items: viewModel.items)
+            let url = try await VideoExportService.shared.export(
+                items: viewModel.items,
+                timestamp: viewModel.project.timestamp
+            )
             try await VideoExportService.shared.saveToPhotoLibrary(url: url)
             exportMessage = "Saved to Photos."
         } catch {
@@ -860,5 +996,5 @@ private extension ProjectEditingConfiguration.Canvas.Preset {
 }
 
 #Preview {
-    EditorView(initialAssets: [])
+    EditorView(initialAssets: [], initialProject: .init())
 }

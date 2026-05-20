@@ -11,6 +11,7 @@ import Foundation
 
 struct ProjectEditingConfiguration: Codable, Equatable {
     var canvas: Canvas = .init()
+    var timestamp: Timestamp = .init()
     var watermark: Watermark? = nil
     var audio: Audio = .init()
     var transcript: Transcript = .init()
@@ -32,6 +33,28 @@ struct ProjectEditingConfiguration: Codable, Equatable {
 
         enum Position: String, Codable {
             case topLeading, topTrailing, bottomLeading, bottomTrailing
+        }
+    }
+
+    struct Timestamp: Codable, Equatable {
+        var enabled: Bool = true
+        var font: FontFace = .rounded
+        var note: String = ""
+
+        enum FontFace: String, CaseIterable, Codable {
+            case system
+            case rounded
+            case serif
+            case monospaced
+
+            var displayName: String {
+                switch self {
+                case .system: return "System"
+                case .rounded: return "Rounded"
+                case .serif: return "Serif"
+                case .monospaced: return "Mono"
+                }
+            }
         }
     }
 

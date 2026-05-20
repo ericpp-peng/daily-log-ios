@@ -19,6 +19,7 @@ final class MediaSelectionViewModel {
     var filter: MediaFilter = .all
 
     private let service = PhotoLibraryService.shared
+    private var selectedAssetIDs: Set<String> = []
 
     var filteredAssets: [MediaAsset] {
         switch filter {
@@ -46,20 +47,35 @@ final class MediaSelectionViewModel {
 
     func loadAssets(for date: Date) async {
         isLoading = true
-        assets = await Task.detached(priority: .userInitiated) { [self] in
+        let selectedAssetIDs = selectedAssetIDs
+        let fetchedAssets = await Task.detached(priority: .userInitiated) { [self] in
             service.fetchAssets(for: date)
         }.value
+
+        let loadedIDs = Set(fetchedAssets.map(\.id))
+        self.selectedAssetIDs.formIntersection(loadedIDs)
+        assets = fetchedAssets.map { asset in
+            var asset = asset
+            asset.isSelected = selectedAssetIDs.contains(asset.id)
+            return asset
+        }
         isLoading = false
     }
 
     func toggleSelection(for id: String) {
         guard let index = assets.firstIndex(where: { $0.id == id }) else { return }
         assets[index].isSelected.toggle()
+        if assets[index].isSelected {
+            selectedAssetIDs.insert(id)
+        } else {
+            selectedAssetIDs.remove(id)
+        }
     }
 
     func selectAll() {
         for index in assets.indices {
             assets[index].isSelected = true
+            selectedAssetIDs.insert(assets[index].id)
         }
     }
 
@@ -67,5 +83,11 @@ final class MediaSelectionViewModel {
         for index in assets.indices {
             assets[index].isSelected = false
         }
+        selectedAssetIDs.removeAll()
+    }
+
+    func resetSelection() {
+        assets = []
+        selectedAssetIDs.removeAll()
     }
 }
