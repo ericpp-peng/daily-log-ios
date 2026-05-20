@@ -2,125 +2,92 @@
 //  EditorToolTray.swift
 //  daily-log-ios
 //
-//  Horizontal tool selector + selected-tool panel.
-//  Phase 2: scaffolds the UI only. Each tool panel will be
-//  populated in Phase 3 (cut/speed/adjusts/crop) and Phase 4
-//  (presets/canvas, audio, transcript).
-//
 
 import SwiftUI
 
 struct EditorToolTray: View {
     @Bindable var viewModel: EditorViewModel
-    var clipBinding: Binding<TimelineItem>?
-    var onClipEditingStarted: () -> Void = {}
-    var onClipEditingEnded: () -> Void = {}
+    let canvasSubtitle: String
+
+    private let visibleTools: [EditorViewModel.Tool] = [
+        .presets,
+        .audio,
+        .adjusts,
+        .speed
+    ]
 
     var body: some View {
-        VStack(spacing: 10) {
-            toolRow
-
-            if let tool = viewModel.selectedTool {
-                toolPanel(for: tool)
-                    .transition(.opacity)
-            }
-        }
-        .animation(.easeInOut(duration: 0.18), value: viewModel.selectedTool)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: - Subviews
-
-    private var toolRow: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 18) {
-                ForEach(EditorViewModel.Tool.allCases) { tool in
-                    ToolButton(
+            HStack(spacing: 12) {
+                ForEach(visibleTools) { tool in
+                    EditorToolCard(
                         tool: tool,
+                        subtitle: subtitle(for: tool),
                         isSelected: viewModel.selectedTool == tool
                     ) {
-                        toggle(tool)
+                        viewModel.selectedTool = tool
                     }
+                    .frame(width: 104, height: 104)
                 }
             }
-            .padding(.horizontal, 16)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 8)
         }
     }
 
-    @ViewBuilder
-    private func toolPanel(for tool: EditorViewModel.Tool) -> some View {
+    private func subtitle(for tool: EditorViewModel.Tool) -> String? {
         switch tool {
-        case .cut:
-            if let clipBinding {
-                ClipTrimView(
-                    item: clipBinding,
-                    onEditingStarted: onClipEditingStarted,
-                    onEditingEnded: onClipEditingEnded
-                )
-            } else {
-                placeholderPanel(for: tool, message: "Tap a clip in the timeline strip to trim it.")
-            }
-        default:
-            placeholderPanel(for: tool, message: placeholderCopy(for: tool))
-        }
-    }
-
-    private func placeholderPanel(for tool: EditorViewModel.Tool, message: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(tool.title)
-                .font(.subheadline.weight(.semibold))
-            Text(message)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
-        .background(Color(.secondarySystemBackground))
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .padding(.horizontal, 16)
-    }
-
-    private func toggle(_ tool: EditorViewModel.Tool) {
-        if viewModel.selectedTool == tool {
-            viewModel.selectedTool = nil
-        } else {
-            viewModel.selectedTool = tool
-        }
-    }
-
-    private func placeholderCopy(for tool: EditorViewModel.Tool) -> String {
-        switch tool {
-        case .cut:        return "Tap a clip in the timeline strip to trim it."
-        case .speed:      return "Change clip playback rate — coming in Phase 3."
-        case .presets:    return "Canvas / aspect-ratio presets — coming in Phase 4."
-        case .adjusts:    return "Brightness, contrast, saturation — coming in Phase 3."
-        case .audio:      return "Audio overdub and mixing — coming in Phase 4."
-        case .transcript: return "Auto-captions with edit support — coming in Phase 4."
+        case .presets:
+            return canvasSubtitle
+        case .audio, .adjusts, .speed, .cut, .transcript:
+            return nil
         }
     }
 }
 
-// MARK: - ToolButton
+// MARK: - EditorToolCard
 
-private struct ToolButton: View {
+private struct EditorToolCard: View {
     let tool: EditorViewModel.Tool
+    let subtitle: String?
     let isSelected: Bool
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
-            VStack(spacing: 6) {
+            VStack(spacing: 5) {
                 Image(systemName: tool.systemImage)
-                    .font(.title3)
-                    .frame(width: 44, height: 44)
-                    .background(
-                        Circle()
-                            .fill(isSelected ? Color.orange.opacity(0.18) : Color(.tertiarySystemBackground))
-                    )
-                    .foregroundStyle(isSelected ? Color.orange : Color.primary)
+                    .font(.title3.weight(.semibold))
+                    .frame(height: 24)
+
                 Text(tool.title)
-                    .font(.caption2.weight(isSelected ? .semibold : .regular))
-                    .foregroundStyle(isSelected ? Color.orange : .secondary)
+                    .font(.callout.weight(.semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(isSelected ? .white.opacity(0.7) : .white.opacity(0.58))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
+                }
+            }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(isSelected ? Color.blue.opacity(0.45) : Color.white.opacity(0.16))
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(isSelected ? Color.blue : .white.opacity(0.12), lineWidth: 1.2)
+            )
+            .overlay(alignment: .topTrailing) {
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.caption.weight(.bold))
+                        .foregroundStyle(.white)
+                        .padding(8)
+                }
             }
         }
         .buttonStyle(.plain)

@@ -57,9 +57,10 @@ struct ClipTrimView: View {
             ClipThumbnailStrip(asset: item.asset, thumbnailCount: 8)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
             DualHandleRangeSlider(
-                range: trimBinding(sourceDuration: sourceDuration),
+                lowerBound: trimLowerBinding(sourceDuration: sourceDuration),
+                upperBound: trimUpperBinding(sourceDuration: sourceDuration),
                 bounds: 0...sourceDuration,
-                minimumDistance: 0.5,
+                minimumDistance: minimumTrimDuration,
                 onEditingStarted: onEditingStarted,
                 onEditingEnded: onEditingEnded
             )
@@ -77,41 +78,58 @@ struct ClipTrimView: View {
         .foregroundStyle(.secondary)
     }
 
-    private func trimBinding(sourceDuration: Double) -> Binding<ClosedRange<Double>> {
+    private var minimumTrimDuration: Double {
+        0.5
+    }
+
+    private func trimLowerBinding(sourceDuration: Double) -> Binding<Double> {
         Binding(
             get: {
-                let lower = min(max(item.configuration.trim.lowerBound, 0), sourceDuration)
-                let upper = min(max(item.configuration.trim.upperBound, lower), sourceDuration)
-                return lower...upper
+                let upper = resolvedTrimUpper(sourceDuration: sourceDuration)
+                return min(max(item.configuration.trim.lowerBound, 0), max(0, upper - minimumTrimDuration))
             },
-            set: { newRange in
-                item.configuration.trim.lowerBound = newRange.lowerBound
-                item.configuration.trim.upperBound = newRange.upperBound
+            set: { newValue in
+                let upper = resolvedTrimUpper(sourceDuration: sourceDuration)
+                item.configuration.trim.lowerBound = min(max(newValue, 0), max(0, upper - minimumTrimDuration))
             }
         )
+    }
+
+    private func trimUpperBinding(sourceDuration: Double) -> Binding<Double> {
+        Binding(
+            get: {
+                resolvedTrimUpper(sourceDuration: sourceDuration)
+            },
+            set: { newValue in
+                let lower = min(max(item.configuration.trim.lowerBound, 0), sourceDuration)
+                item.configuration.trim.upperBound = min(max(newValue, lower + minimumTrimDuration), sourceDuration)
+            }
+        )
+    }
+
+    private func resolvedTrimUpper(sourceDuration: Double) -> Double {
+        let lower = min(max(item.configuration.trim.lowerBound, 0), sourceDuration)
+        return min(max(item.configuration.trim.upperBound, lower + minimumTrimDuration), sourceDuration)
     }
 
     // MARK: - Photo duration
 
     @ViewBuilder
     private var photoBody: some View {
-        ClipThumbnailStrip(asset: item.asset, thumbnailCount: 1)
-            .frame(height: 64)
-            .clipShape(RoundedRectangle(cornerRadius: 6))
+        ZStack {
+            ClipThumbnailStrip(asset: item.asset, thumbnailCount: 1)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
 
-        Slider(
-            value: $item.configuration.displayDuration,
-            in: TimelineViewModel.minPhotoDuration...TimelineViewModel.maxPhotoDuration,
-            step: 0.5,
-            onEditingChanged: { editing in
-                if editing {
-                    onEditingStarted()
-                } else {
-                    onEditingEnded()
-                }
-            }
-        )
-        .tint(.orange)
+            DualHandleRangeSlider(
+                lowerBound: photoLowerBinding,
+                upperBound: photoUpperBinding,
+                bounds: photoDurationBounds,
+                minimumDistance: TimelineViewModel.minPhotoDuration,
+                onEditingStarted: onEditingStarted,
+                onEditingEnded: onEditingEnded
+            )
+        }
+        .frame(height: 64)
 
         HStack {
             Text("Duration \(TimelineItem.formatTime(item.configuration.displayDuration))")
@@ -124,5 +142,62 @@ struct ClipTrimView: View {
         }
         .font(.caption.monospacedDigit())
         .foregroundStyle(.secondary)
+    }
+
+    private var photoDurationBounds: ClosedRange<Double> {
+        0...TimelineViewModel.maxPhotoDuration
+    }
+
+    private var photoLowerBinding: Binding<Double> {
+        Binding(
+            get: {
+                resolvedPhotoRange.lowerBound
+            },
+            set: { newValue in
+                let range = resolvedPhotoRange
+                let lower = min(
+                    max(newValue, photoDurationBounds.lowerBound),
+                    range.upperBound - TimelineViewModel.minPhotoDuration
+                )
+                setPhotoRange(lower...range.upperBound)
+            }
+        )
+    }
+
+    private var photoUpperBinding: Binding<Double> {
+        Binding(
+            get: {
+                resolvedPhotoRange.upperBound
+            },
+            set: { newValue in
+                let range = resolvedPhotoRange
+                let upper = min(
+                    max(newValue, range.lowerBound + TimelineViewModel.minPhotoDuration),
+                    photoDurationBounds.upperBound
+                )
+                setPhotoRange(range.lowerBound...upper)
+            }
+        )
+    }
+
+    private var resolvedPhotoRange: ClosedRange<Double> {
+        let lower = min(
+            max(item.configuration.trim.lowerBound, photoDurationBounds.lowerBound),
+            photoDurationBounds.upperBound - TimelineViewModel.minPhotoDuration
+        )
+        let upper = min(
+            max(item.configuration.trim.upperBound, lower + TimelineViewModel.minPhotoDuration),
+            photoDurationBounds.upperBound
+        )
+        return lower...upper
+    }
+
+    private func setPhotoRange(_ range: ClosedRange<Double>) {
+        item.configuration.trim.lowerBound = range.lowerBound
+        item.configuration.trim.upperBound = range.upperBound
+        item.configuration.displayDuration = max(
+            TimelineViewModel.minPhotoDuration,
+            range.upperBound - range.lowerBound
+        )
     }
 }

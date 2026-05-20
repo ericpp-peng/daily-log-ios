@@ -15,7 +15,7 @@ import SwiftUI
 @MainActor
 @Observable
 final class EditorViewModel {
-    var selectedTool: Tool? = nil
+    var selectedTool: Tool? = .presets
     var showsSaveConfirmation: Bool = false
 
     enum Tool: String, CaseIterable, Identifiable {
@@ -32,8 +32,8 @@ final class EditorViewModel {
             switch self {
             case .cut:        return "Cut"
             case .speed:      return "Speed"
-            case .presets:    return "Canvas"
-            case .adjusts:    return "Adjust"
+            case .presets:    return "Presets"
+            case .adjusts:    return "Adjusts"
             case .audio:      return "Audio"
             case .transcript: return "Captions"
             }
@@ -42,10 +42,10 @@ final class EditorViewModel {
         var systemImage: String {
             switch self {
             case .cut:        return "scissors"
-            case .speed:      return "speedometer"
-            case .presets:    return "aspectratio"
-            case .adjusts:    return "slider.horizontal.3"
-            case .audio:      return "music.note"
+            case .speed:      return "timer"
+            case .presets:    return "rectangle.on.rectangle"
+            case .adjusts:    return "circle.righthalf.filled"
+            case .audio:      return "waveform"
             case .transcript: return "text.bubble"
             }
         }

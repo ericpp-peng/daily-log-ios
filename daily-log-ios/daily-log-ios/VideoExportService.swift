@@ -90,7 +90,7 @@ class VideoExportService {
                     continue
                 }
 
-                let durationSeconds = max(item.configuration.displayDuration, 0.5)
+                let durationSeconds = max(item.effectiveDuration, 0.5)
                 let stillURL = try await makeStillVideo(
                     from: image,
                     duration: durationSeconds,

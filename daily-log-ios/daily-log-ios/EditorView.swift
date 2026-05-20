@@ -5,10 +5,12 @@
 
 import SwiftUI
 import Photos
-import UniformTypeIdentifiers
 
 struct EditorView: View {
+    @Environment(\.dismiss) private var dismiss
+
     let initialAssets: [MediaAsset]
+
     @State private var viewModel = TimelineViewModel()
     @State private var playerManager = VideoPlayerManager()
     @State private var editorViewModel = EditorViewModel()
@@ -19,45 +21,44 @@ struct EditorView: View {
     @State private var showExportAlert = false
     @State private var exportMessage = ""
 
-    private let pointsPerSecond: CGFloat = 32
-    private let clipSpacing: CGFloat = 10
-
     var body: some View {
-        @Bindable var viewModel = viewModel
-        return ScrollView {
+        @Bindable var bindableViewModel = viewModel
+
+        return ZStack {
+            Color.black.ignoresSafeArea()
+
             VStack(spacing: 0) {
-                timelineHeader
-                Divider()
-                timelineStrip
-                Divider()
-                selectedClipPreview
-                Divider()
+                topBar
+
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 28) {
+                        previewSurface
+                            .padding(.horizontal, 28)
+                            .padding(.top, 26)
+
+                        playbackTimeline(
+                            clipBinding: selectedClipBinding(viewModel: bindableViewModel),
+                            items: $bindableViewModel.items
+                        )
+                        .padding(.horizontal, 24)
+                    }
+                    .padding(.bottom, 24)
+                }
+
                 EditorToolTray(
                     viewModel: editorViewModel,
-                    clipBinding: selectedClipBinding(viewModel: viewModel),
-                    onClipEditingStarted: handleClipEditingStarted,
-                    onClipEditingEnded: handleClipEditingEnded
+                    canvasSubtitle: viewModel.project.canvas.preset.displayName
                 )
+                .padding(.bottom, 10)
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            bottomBar
-                .background(Color(.systemBackground))
-        }
-        .navigationTitle("Editor")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Button("Save") {
-                    editorViewModel.showsSaveConfirmation = true
-                }
-                .disabled(viewModel.items.isEmpty)
-            }
-        }
-        .alert("Save", isPresented: $editorViewModel.showsSaveConfirmation) {
+        .preferredColorScheme(.dark)
+        .navigationBarBackButtonHidden(true)
+        .toolbar(.hidden, for: .navigationBar)
+        .alert("Export", isPresented: $showExportAlert) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Project saving will land with Phase 6 (draft persistence).")
+            Text(exportMessage)
         }
         .onAppear {
             if viewModel.items.isEmpty {
@@ -67,8 +68,8 @@ struct EditorView: View {
             if selectedItemId == nil {
                 selectedItemId = viewModel.items.first?.id
             }
-            if let id = selectedItemId {
-                playerManager.selectItem(id: id)
+            if let selectedItemId {
+                playerManager.selectItem(id: selectedItemId)
             }
         }
         .onDisappear {
@@ -92,125 +93,94 @@ struct EditorView: View {
         }
     }
 
-    // MARK: - Timeline
+    // MARK: - Top Bar
 
-    private var timelineHeader: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Timeline")
-                    .font(.headline)
-                Text("\(viewModel.items.count) clips ordered by capture time")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
+    private var topBar: some View {
+        ZStack {
+            Text("Editor")
+                .font(.headline.weight(.semibold))
+                .foregroundStyle(.white)
 
-            Spacer()
-
-            Text(viewModel.totalDurationString)
-                .font(.subheadline.monospacedDigit().weight(.medium))
-                .foregroundStyle(.secondary)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-    }
-
-    private var timelineStrip: some View {
-        GeometryReader { proxy in
-            ZStack {
-                Color(.secondarySystemBackground)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(alignment: .center, spacing: clipSpacing) {
-                        ForEach($viewModel.items) { $item in
-                            TimelineClipBlock(
-                                item: $item,
-                                isSelected: item.id == selectedItemId,
-                                width: clipWidth(for: item)
-                            ) {
-                                selectedItemId = item.id
-                            }
-                            .onDrag {
-                                draggedClipId = item.id
-                                return NSItemProvider(object: item.id as NSString)
-                            }
-                            .onDrop(
-                                of: [.text],
-                                delegate: ClipDropDelegate(
-                                    itemId: item.id,
-                                    items: $viewModel.items,
-                                    draggedItemId: $draggedClipId
-                                )
-                            )
-                        }
-                    }
-                    .padding(.horizontal, max(16, proxy.size.width / 2 - 42))
-                    .padding(.vertical, 18)
-                }
-
-                FixedPlayhead()
-                    .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
-            }
-        }
-        .frame(height: 132)
-    }
-
-    private func clipWidth(for item: TimelineItem) -> CGFloat {
-        let duration = item.asset.type == .video ? item.effectiveDuration : item.configuration.displayDuration
-        return min(max(CGFloat(duration) * pointsPerSecond, 84), 180)
-    }
-
-    // MARK: - Preview
-
-    private var selectedClipPreview: some View {
-        VStack(alignment: .leading, spacing: 12) {
             HStack {
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(currentClip?.captureTimeString ?? "Select a clip")
-                        .font(.subheadline.weight(.semibold))
-                    if let clip = currentClip {
-                        Text("\(clip.asset.type.label) · \(clip.durationString)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    } else {
-                        Text("Tap a clip block to preview it.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                Button {
+                    playerManager.pause()
+                    dismiss()
+                } label: {
+                    Text("Cancel")
+                        .font(.body.weight(.medium))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .frame(height: 44)
+                        .background(.white.opacity(0.08))
+                        .clipShape(Capsule())
+                        .overlay(
+                            Capsule()
+                                .stroke(.white.opacity(0.12), lineWidth: 1)
+                        )
                 }
 
                 Spacer()
 
                 Button {
-                    removeSelected()
+                    Task { await exportTimeline() }
                 } label: {
-                    Image(systemName: "trash")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 36, height: 36)
+                    topIconLabel(systemName: "square.and.arrow.up")
                 }
-                .buttonStyle(.bordered)
-                .disabled(selectedItemId == nil)
+                .disabled(isExporting || viewModel.items.isEmpty)
+
+                Button {
+                    Task { await exportTimeline() }
+                } label: {
+                    ZStack {
+                        Circle()
+                            .fill(Color.blue)
+                        if isExporting {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Image(systemName: "checkmark")
+                                .font(.title.weight(.medium))
+                                .foregroundStyle(.white)
+                        }
+                    }
+                    .frame(width: 48, height: 48)
+                }
+                .disabled(isExporting || viewModel.items.isEmpty)
             }
-
-            previewSurface
-
-            playbackControls
         }
-        .padding(16)
+        .padding(.horizontal, 18)
+        .padding(.top, 8)
+        .padding(.bottom, 10)
     }
+
+    private func topIconLabel(systemName: String) -> some View {
+        Image(systemName: systemName)
+            .font(.title3.weight(.medium))
+            .foregroundStyle(.white)
+            .frame(width: 44, height: 44)
+            .background(.white.opacity(0.08))
+            .clipShape(Circle())
+            .overlay(
+                Circle()
+                    .stroke(.white.opacity(0.12), lineWidth: 1)
+            )
+    }
+
+    // MARK: - Preview
 
     private var previewSurface: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .fill(Color.black)
 
             if let clip = currentClip {
                 if clip.asset.type == .video {
                     VideoPlayerLayerView(player: playerManager.player)
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 } else if let image = playerManager.currentImage {
                     Image(uiImage: image)
                         .resizable()
-                        .scaledToFit()
+                        .scaledToFill()
                 } else if playerManager.isLoadingClip {
                     ProgressView().tint(.white)
                 }
@@ -220,46 +190,140 @@ struct EditorView: View {
                     .foregroundStyle(.white.opacity(0.75))
             }
         }
-        .aspectRatio(9.0 / 16.0, contentMode: .fit)
+        .aspectRatio(viewModel.project.canvas.preset.aspectRatio, contentMode: .fit)
         .frame(maxWidth: .infinity)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 
-    private var playbackControls: some View {
-        HStack(spacing: 14) {
+    // MARK: - Playback Timeline
+
+    private func playbackTimeline(
+        clipBinding: Binding<TimelineItem>?,
+        items: Binding<[TimelineItem]>
+    ) -> some View {
+        HStack(alignment: .center, spacing: 22) {
             Button {
                 playerManager.toggle()
             } label: {
                 Image(systemName: playerManager.isPlaying ? "pause.fill" : "play.fill")
-                    .font(.title3)
-                    .frame(width: 40, height: 40)
-                    .foregroundStyle(.white)
-                    .background(Color.orange)
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(Color.blue)
+                    .frame(width: 72, height: 72)
+                    .background(.white.opacity(0.08))
                     .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(.white.opacity(0.12), lineWidth: 1)
+                    )
             }
             .disabled(viewModel.items.isEmpty)
 
-            Slider(
-                value: Binding(
-                    get: { playerManager.globalTime },
-                    set: { playerManager.seek(toGlobal: $0) }
-                ),
-                in: 0...max(playerManager.totalDuration, 0.01)
-            )
-            .tint(.orange)
-            .disabled(viewModel.items.isEmpty)
+            VStack(spacing: 8) {
+                timeBadge
 
-            Text(timeText)
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .frame(width: 78, alignment: .trailing)
+                if let clipBinding {
+                    ClipPlaybackTimelineTrack(
+                        item: clipBinding,
+                        localPlaybackTime: currentClipLocalTime,
+                        onEditingStarted: handleClipEditingStarted,
+                        onEditingEnded: handleClipEditingEnded,
+                        onSeekLocalTime: seekSelectedClip(toLocalTime:)
+                    )
+                    .frame(height: 64)
+                } else {
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(.white.opacity(0.08))
+                        .frame(height: 64)
+                }
+
+                timelineFooter
+
+                clipSelectorStrip(items: items)
+            }
+            .frame(maxWidth: .infinity)
         }
     }
 
-    private var timeText: String {
-        let cur = TimelineItem.formatTime(playerManager.globalTime)
-        let total = TimelineItem.formatTime(playerManager.totalDuration)
-        return "\(cur) / \(total)"
+    private func clipSelectorStrip(items: Binding<[TimelineItem]>) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(items) { $item in
+                    MiniTimelineClip(
+                        item: item,
+                        isSelected: item.id == selectedItemId
+                    ) {
+                        selectedItemId = item.id
+                    }
+                    .onDrag {
+                        draggedClipId = item.id
+                        return NSItemProvider(object: item.id as NSString)
+                    }
+                    .onDrop(
+                        of: [.text],
+                        delegate: MiniClipDropDelegate(
+                            itemId: item.id,
+                            items: items,
+                            draggedItemId: $draggedClipId
+                        )
+                    )
+                }
+            }
+            .padding(.vertical, 4)
+        }
+        .frame(height: 52)
+    }
+
+    private var timeBadge: some View {
+        Text("\(Self.formatPreciseTime(currentClipLocalTime)) / \(Self.formatPreciseTime(currentClipDuration))")
+            .font(.caption.monospacedDigit())
+            .foregroundStyle(.white)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(.white.opacity(0.09))
+            .clipShape(Capsule())
+            .overlay(
+                Capsule()
+                    .stroke(.white.opacity(0.12), lineWidth: 1)
+            )
+    }
+
+    private var timelineFooter: some View {
+        HStack {
+            Text(currentClipStartLabel)
+            Spacer()
+            Text(currentClipEndLabel)
+        }
+        .font(.caption.monospacedDigit().weight(.medium))
+        .foregroundStyle(.white)
+    }
+
+    private var currentClipStartLabel: String {
+        guard let clip = currentClip else { return "00:00.00" }
+        if clip.asset.type == .video {
+            return Self.formatPreciseTime(clip.configuration.trim.lowerBound)
+        }
+        return Self.formatPreciseTime(clip.configuration.trim.lowerBound)
+    }
+
+    private var currentClipEndLabel: String {
+        guard let clip = currentClip else { return "00:00.00" }
+        if clip.asset.type == .video {
+            return Self.formatPreciseTime(clip.configuration.trim.upperBound)
+        }
+        return Self.formatPreciseTime(clip.configuration.trim.upperBound)
+    }
+
+    private var currentClipDuration: TimeInterval {
+        currentClip?.effectiveDuration ?? 0
+    }
+
+    private var currentClipLocalTime: TimeInterval {
+        guard let currentClip,
+              let index = viewModel.items.firstIndex(where: { $0.id == currentClip.id }) else {
+            return 0
+        }
+        let start = globalStartTime(forItemAt: index)
+        return min(max(playerManager.globalTime - start, 0), currentClip.effectiveDuration)
     }
 
     private var currentClip: TimelineItem? {
@@ -282,6 +346,20 @@ struct EditorView: View {
         )
     }
 
+    private func seekSelectedClip(toLocalTime localTime: TimeInterval) {
+        guard let selectedItemId,
+              let index = viewModel.items.firstIndex(where: { $0.id == selectedItemId }) else {
+            return
+        }
+        let start = globalStartTime(forItemAt: index)
+        playerManager.seek(toGlobal: start + localTime)
+    }
+
+    private func globalStartTime(forItemAt targetIndex: Int) -> TimeInterval {
+        guard targetIndex > 0 else { return 0 }
+        return viewModel.items.prefix(targetIndex).reduce(0) { $0 + $1.effectiveDuration }
+    }
+
     private func handleClipEditingStarted() {
         playerManager.pause()
     }
@@ -293,70 +371,7 @@ struct EditorView: View {
         }
     }
 
-    private func removeSelected() {
-        guard let selectedItemId,
-              let index = viewModel.items.firstIndex(where: { $0.id == selectedItemId }) else {
-            return
-        }
-
-        viewModel.items.remove(at: index)
-        reindexTimelineItems()
-
-        if viewModel.items.indices.contains(index) {
-            self.selectedItemId = viewModel.items[index].id
-        } else {
-            self.selectedItemId = viewModel.items.last?.id
-        }
-    }
-
-    private func reindexTimelineItems() {
-        for index in viewModel.items.indices {
-            viewModel.items[index].orderIndex = index
-        }
-    }
-
     // MARK: - Export
-
-    private var bottomBar: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("\(viewModel.items.count) clips")
-                    .font(.subheadline.weight(.medium))
-                Text(viewModel.totalDurationString + " total")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-
-            Spacer()
-
-            Button {
-                Task { await exportTimeline() }
-            } label: {
-                if isExporting {
-                    ProgressView()
-                        .tint(.white)
-                        .frame(width: 72)
-                } else {
-                    Text("Export")
-                        .font(.body.weight(.semibold))
-                        .frame(width: 72)
-                }
-            }
-            .foregroundStyle(.white)
-            .padding(.vertical, 10)
-            .background(Color.orange)
-            .clipShape(Capsule())
-            .disabled(isExporting || viewModel.items.isEmpty)
-            .opacity(isExporting || viewModel.items.isEmpty ? 0.5 : 1)
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .alert("Export", isPresented: $showExportAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text(exportMessage)
-        }
-    }
 
     private func exportTimeline() async {
         guard !isExporting else { return }
@@ -379,20 +394,233 @@ struct EditorView: View {
         isExporting = false
         showExportAlert = true
     }
+
+    private static func formatPreciseTime(_ value: TimeInterval) -> String {
+        let clamped = max(value, 0)
+        let minutes = Int(clamped) / 60
+        let seconds = Int(clamped) % 60
+        let hundredths = Int((clamped - floor(clamped)) * 100)
+        return String(format: "%02d:%02d.%02d", minutes, seconds, hundredths)
+    }
 }
 
-// MARK: - TimelineClipBlock
+// MARK: - ClipPlaybackTimelineTrack
 
-private struct TimelineClipBlock: View {
+private struct ClipPlaybackTimelineTrack: View {
     @Binding var item: TimelineItem
+
+    let localPlaybackTime: TimeInterval
+    let onEditingStarted: () -> Void
+    let onEditingEnded: () -> Void
+    let onSeekLocalTime: (TimeInterval) -> Void
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                ClipThumbnailStrip(asset: item.asset, thumbnailCount: thumbnailCount)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .gesture(seekGesture(width: proxy.size.width))
+
+                trimOverlay(width: proxy.size.width)
+
+                playhead(width: proxy.size.width)
+            }
+        }
+    }
+
+    private var thumbnailCount: Int {
+        item.asset.type == .video ? 8 : 1
+    }
+
+    @ViewBuilder
+    private func trimOverlay(width: CGFloat) -> some View {
+        if item.asset.type == .video {
+            let sourceDuration = videoSourceDuration
+            DualHandleRangeSlider(
+                lowerBound: trimLowerBinding(sourceDuration: sourceDuration),
+                upperBound: trimUpperBinding(sourceDuration: sourceDuration),
+                bounds: 0...sourceDuration,
+                minimumDistance: minimumTrimDuration,
+                onEditingStarted: onEditingStarted,
+                onEditingEnded: onEditingEnded
+            )
+        } else {
+            DualHandleRangeSlider(
+                lowerBound: photoLowerBinding,
+                upperBound: photoUpperBinding,
+                bounds: photoDurationBounds,
+                minimumDistance: TimelineViewModel.minPhotoDuration,
+                onEditingStarted: onEditingStarted,
+                onEditingEnded: onEditingEnded
+            )
+        }
+    }
+
+    private func playhead(width: CGFloat) -> some View {
+        Rectangle()
+            .fill(Color.blue)
+            .frame(width: 2)
+            .frame(maxHeight: .infinity)
+            .offset(x: playheadX(width: width))
+            .allowsHitTesting(false)
+    }
+
+    private var videoSourceDuration: TimeInterval {
+        max(item.asset.duration ?? item.configuration.trim.upperBound, 0.5)
+    }
+
+    private var minimumTrimDuration: TimeInterval {
+        0.5
+    }
+
+    private var photoDurationBounds: ClosedRange<Double> {
+        0...TimelineViewModel.maxPhotoDuration
+    }
+
+    private var photoLowerBinding: Binding<Double> {
+        Binding(
+            get: {
+                resolvedPhotoRange.lowerBound
+            },
+            set: { newValue in
+                let range = resolvedPhotoRange
+                let lower = min(
+                    max(newValue, photoDurationBounds.lowerBound),
+                    range.upperBound - TimelineViewModel.minPhotoDuration
+                )
+                setPhotoRange(lower...range.upperBound)
+            }
+        )
+    }
+
+    private var photoUpperBinding: Binding<Double> {
+        Binding(
+            get: {
+                resolvedPhotoRange.upperBound
+            },
+            set: { newValue in
+                let range = resolvedPhotoRange
+                let upper = min(
+                    max(newValue, range.lowerBound + TimelineViewModel.minPhotoDuration),
+                    photoDurationBounds.upperBound
+                )
+                setPhotoRange(range.lowerBound...upper)
+            }
+        )
+    }
+
+    private var resolvedPhotoRange: ClosedRange<Double> {
+        let lower = min(
+            max(item.configuration.trim.lowerBound, photoDurationBounds.lowerBound),
+            photoDurationBounds.upperBound - TimelineViewModel.minPhotoDuration
+        )
+        let upper = min(
+            max(item.configuration.trim.upperBound, lower + TimelineViewModel.minPhotoDuration),
+            photoDurationBounds.upperBound
+        )
+        return lower...upper
+    }
+
+    private func setPhotoRange(_ range: ClosedRange<Double>) {
+        item.configuration.trim.lowerBound = range.lowerBound
+        item.configuration.trim.upperBound = range.upperBound
+        item.configuration.displayDuration = max(
+            TimelineViewModel.minPhotoDuration,
+            range.upperBound - range.lowerBound
+        )
+    }
+
+    private func trimLowerBinding(sourceDuration: TimeInterval) -> Binding<Double> {
+        Binding(
+            get: {
+                let upper = resolvedTrimUpper(sourceDuration: sourceDuration)
+                return min(max(item.configuration.trim.lowerBound, 0), max(0, upper - minimumTrimDuration))
+            },
+            set: { newValue in
+                let upper = resolvedTrimUpper(sourceDuration: sourceDuration)
+                item.configuration.trim.lowerBound = min(max(newValue, 0), max(0, upper - minimumTrimDuration))
+            }
+        )
+    }
+
+    private func trimUpperBinding(sourceDuration: TimeInterval) -> Binding<Double> {
+        Binding(
+            get: {
+                resolvedTrimUpper(sourceDuration: sourceDuration)
+            },
+            set: { newValue in
+                let lower = min(max(item.configuration.trim.lowerBound, 0), sourceDuration)
+                item.configuration.trim.upperBound = min(max(newValue, lower + minimumTrimDuration), sourceDuration)
+            }
+        )
+    }
+
+    private func resolvedTrimUpper(sourceDuration: TimeInterval) -> TimeInterval {
+        let lower = min(max(item.configuration.trim.lowerBound, 0), sourceDuration)
+        return min(max(item.configuration.trim.upperBound, lower + minimumTrimDuration), sourceDuration)
+    }
+
+    private func seekGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                seek(toX: value.location.x, width: width)
+            }
+            .onEnded { value in
+                seek(toX: value.location.x, width: width)
+            }
+    }
+
+    private func seek(toX x: CGFloat, width: CGFloat) {
+        guard width > 0 else { return }
+        let progress = min(max(x / width, 0), 1)
+
+        if item.asset.type == .video {
+            let sourceTime = (Double(progress) * videoSourceDuration)
+                .clamped(to: item.configuration.trim.lowerBound...item.configuration.trim.upperBound)
+            let rate = max(item.configuration.playback.rate, 0.01)
+            onSeekLocalTime((sourceTime - item.configuration.trim.lowerBound) / rate)
+        } else {
+            let range = resolvedPhotoRange
+            let photoTime = (Double(progress) * photoDurationBounds.upperBound)
+                .clamped(to: range)
+            onSeekLocalTime(photoTime - range.lowerBound)
+        }
+    }
+
+    private func playheadX(width: CGFloat) -> CGFloat {
+        guard width > 0 else { return 0 }
+
+        if item.asset.type == .video {
+            let rate = max(item.configuration.playback.rate, 0.01)
+            let sourceTime = item.configuration.trim.lowerBound + (localPlaybackTime * rate)
+            let progress = sourceTime / max(videoSourceDuration, 0.001)
+            return min(max(CGFloat(progress) * width, 0), width)
+        }
+
+        let range = resolvedPhotoRange
+        let sourceTime = range.lowerBound + localPlaybackTime
+        let progress = sourceTime / max(photoDurationBounds.upperBound, 0.001)
+        return min(max(CGFloat(progress) * width, 0), width)
+    }
+}
+
+private extension Double {
+    func clamped(to range: ClosedRange<Double>) -> Double {
+        min(max(self, range.lowerBound), range.upperBound)
+    }
+}
+
+// MARK: - Mini Timeline Rail
+
+private struct MiniTimelineClip: View {
+    let item: TimelineItem
     let isSelected: Bool
-    let width: CGFloat
     let onSelect: () -> Void
 
     @State private var thumbnail: UIImage?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        Button(action: onSelect) {
             ZStack(alignment: .bottomLeading) {
                 Group {
                     if let thumbnail {
@@ -400,76 +628,36 @@ private struct TimelineClipBlock: View {
                             .resizable()
                             .scaledToFill()
                     } else {
-                        Color(.systemGray5)
-                            .overlay(ProgressView().scaleEffect(0.6))
+                        Color.white.opacity(0.08)
+                            .overlay(ProgressView().scaleEffect(0.5).tint(.white))
                     }
                 }
-                .frame(width: width, height: 72)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(width: 74, height: 44)
+                .clipped()
 
-                HStack(spacing: 5) {
-                    Image(systemName: item.asset.type.systemImageName)
-                        .font(.caption2)
-                    Text(item.durationString)
-                        .font(.caption.monospacedDigit().weight(.semibold))
-                }
-                .foregroundStyle(.white)
-                .padding(.horizontal, 7)
-                .padding(.vertical, 5)
-                .background(.black.opacity(0.52))
-                .clipShape(Capsule())
-                .padding(6)
+                Image(systemName: item.asset.type == .video ? "video.fill" : "photo.fill")
+                    .font(.caption2)
+                    .foregroundStyle(.white)
+                    .padding(5)
             }
+            .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.orange : Color.clear, lineWidth: 3)
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .stroke(isSelected ? Color.yellow : .white.opacity(0.12), lineWidth: isSelected ? 2 : 1)
             )
-
-            Text(item.captureTimeString)
-                .font(.caption2)
-                .foregroundStyle(isSelected ? .primary : .secondary)
-                .lineLimit(1)
-                .frame(width: width, alignment: .leading)
+            .opacity(isSelected ? 1 : 0.58)
         }
-        .contentShape(RoundedRectangle(cornerRadius: 8))
-        .onTapGesture(perform: onSelect)
+        .buttonStyle(.plain)
         .task(id: item.id) {
             thumbnail = await PhotoLibraryService.shared.requestThumbnail(
                 for: item.asset,
-                targetSize: CGSize(width: 240, height: 240)
+                targetSize: CGSize(width: 148, height: 88)
             )
         }
     }
 }
 
-private struct FixedPlayhead: View {
-    var body: some View {
-        VStack(spacing: 0) {
-            Triangle()
-                .fill(Color.orange)
-                .frame(width: 14, height: 10)
-
-            Rectangle()
-                .fill(Color.orange)
-                .frame(width: 2, height: 98)
-        }
-        .shadow(color: .orange.opacity(0.35), radius: 2)
-        .allowsHitTesting(false)
-    }
-}
-
-private struct Triangle: Shape {
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.maxY))
-        path.addLine(to: CGPoint(x: rect.minX, y: rect.minY))
-        path.addLine(to: CGPoint(x: rect.maxX, y: rect.minY))
-        path.closeSubpath()
-        return path
-    }
-}
-
-private struct ClipDropDelegate: DropDelegate {
+private struct MiniClipDropDelegate: DropDelegate {
     let itemId: String
     @Binding var items: [TimelineItem]
     @Binding var draggedItemId: String?
@@ -504,21 +692,24 @@ private struct ClipDropDelegate: DropDelegate {
     }
 }
 
-private extension MediaType {
-    var label: String {
+private extension ProjectEditingConfiguration.Canvas.Preset {
+    var displayName: String {
         switch self {
-        case .video: return "Video"
-        case .livePhoto: return "Live Photo"
-        case .image: return "Photo"
-        case .unknown: return "Media"
+        case .original: return "Original"
+        case .vertical9x16: return "Portrait 9:16"
+        case .square1x1: return "Square 1:1"
+        case .landscape16x9: return "Landscape 16:9"
         }
     }
 
-    var systemImageName: String {
+    var aspectRatio: CGFloat {
         switch self {
-        case .video: return "video.fill"
-        case .livePhoto: return "livephoto"
-        case .image, .unknown: return "photo.fill"
+        case .original, .vertical9x16:
+            return 9.0 / 16.0
+        case .square1x1:
+            return 1.0
+        case .landscape16x9:
+            return 16.0 / 9.0
         }
     }
 }
