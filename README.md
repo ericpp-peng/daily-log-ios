@@ -65,6 +65,10 @@ This is intentionally not a full video editor. The MVP focuses on the daily log 
 
 See [DESIGN.md](DESIGN.md) for the full product and technical design.
 
+## License
+
+Daily Log is open source under the [MIT License](LICENSE).
+
 ## Acknowledgements
 
 Thanks to didisouzacosta for creating [didisouzacosta/VideoEditorKit](https://github.com/didisouzacosta/VideoEditorKit). The video editor experience in Daily Log references ideas from that repo.

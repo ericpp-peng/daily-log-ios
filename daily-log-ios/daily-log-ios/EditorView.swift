@@ -99,8 +99,8 @@ struct EditorView: View {
             refreshInitialLivePhotoVideoDurations()
         }
         .onDisappear {
-            playerManager.pause()
             onUpdate(viewModel.items, viewModel.project)
+            playerManager.tearDown()
         }
         .onChange(of: selectedItemId) { _, newId in
             if let newId, playerManager.currentItem?.id != newId {

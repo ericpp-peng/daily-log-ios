@@ -27,48 +27,50 @@ class PhotoLibraryService {
     }
 
     func fetchAssets(for date: Date) -> [MediaAsset] {
-        let calendar = Calendar.current
-        let startOfDay = calendar.startOfDay(for: date)
-        guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
-            return []
-        }
-
-        let fetchOptions = PHFetchOptions()
-        fetchOptions.predicate = NSPredicate(
-            format: "creationDate >= %@ AND creationDate < %@",
-            startOfDay as NSDate,
-            endOfDay as NSDate
-        )
-        fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
-
-        let result = PHAsset.fetchAssets(with: fetchOptions)
-        var assets: [MediaAsset] = []
-
-        result.enumerateObjects { phAsset, _, _ in
-            let type: MediaType
-            switch phAsset.mediaType {
-            case .image:
-                type = phAsset.mediaSubtypes.contains(.photoLive) ? .livePhoto : .image
-            case .video:
-                type = .video
-            default:
-                type = .unknown
+        autoreleasepool {
+            let calendar = Calendar.current
+            let startOfDay = calendar.startOfDay(for: date)
+            guard let endOfDay = calendar.date(byAdding: .day, value: 1, to: startOfDay) else {
+                return []
             }
 
-            let asset = MediaAsset(
-                id: phAsset.localIdentifier,
-                type: type,
-                creationDate: phAsset.creationDate,
-                modificationDate: phAsset.modificationDate,
-                duration: phAsset.mediaType == .video ? phAsset.duration : nil,
-                localIdentifier: phAsset.localIdentifier,
-                isSelected: false,
-                phAsset: phAsset
+            let fetchOptions = PHFetchOptions()
+            fetchOptions.predicate = NSPredicate(
+                format: "creationDate >= %@ AND creationDate < %@",
+                startOfDay as NSDate,
+                endOfDay as NSDate
             )
-            assets.append(asset)
-        }
+            fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
 
-        return assets
+            let result = PHAsset.fetchAssets(with: fetchOptions)
+            var assets: [MediaAsset] = []
+
+            result.enumerateObjects { phAsset, _, _ in
+                let type: MediaType
+                switch phAsset.mediaType {
+                case .image:
+                    type = phAsset.mediaSubtypes.contains(.photoLive) ? .livePhoto : .image
+                case .video:
+                    type = .video
+                default:
+                    type = .unknown
+                }
+
+                let asset = MediaAsset(
+                    id: phAsset.localIdentifier,
+                    type: type,
+                    creationDate: phAsset.creationDate,
+                    modificationDate: phAsset.modificationDate,
+                    duration: phAsset.mediaType == .video ? phAsset.duration : nil,
+                    localIdentifier: phAsset.localIdentifier,
+                    isSelected: false,
+                    phAsset: phAsset
+                )
+                assets.append(asset)
+            }
+
+            return assets
+        }
     }
 
     func makeMediaAsset(from phAsset: PHAsset) -> MediaAsset {

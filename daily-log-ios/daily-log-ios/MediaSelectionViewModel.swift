@@ -96,7 +96,8 @@ final class MediaSelectionViewModel {
     func loadAssets(for date: Date) async {
         isLoading = true
         let selectedAssetIDs = selectedAssetIDs
-        let fetchedAssets = await Task.detached(priority: .userInitiated) { [self] in
+        let service = service
+        let fetchedAssets = await Task.detached(priority: .userInitiated) {
             service.fetchAssets(for: date)
         }.value
 

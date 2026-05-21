@@ -409,8 +409,7 @@ private struct MediaQuickPreviewOverlay: View {
             await loadPreview()
         }
         .onDisappear {
-            player.pause()
-            player.replaceCurrentItem(with: nil)
+            cleanupPreview()
         }
     }
 
@@ -472,6 +471,7 @@ private struct MediaQuickPreviewOverlay: View {
 
     private func loadPreview() async {
         showsVideoPreview = false
+        previewImage = nil
         player.pause()
         player.replaceCurrentItem(with: nil)
 
@@ -491,6 +491,13 @@ private struct MediaQuickPreviewOverlay: View {
             for: asset,
             targetSize: CGSize(width: 1200, height: 1200)
         )
+    }
+
+    private func cleanupPreview() {
+        player.pause()
+        player.replaceCurrentItem(with: nil)
+        previewImage = nil
+        showsVideoPreview = false
     }
 
     private func configurePreviewAudioSession() {

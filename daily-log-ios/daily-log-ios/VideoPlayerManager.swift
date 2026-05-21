@@ -101,6 +101,18 @@ final class VideoPlayerManager {
         photoTimerTask = nil
     }
 
+    func tearDown() {
+        pause()
+        loadGeneration += 1
+        player.replaceCurrentItem(with: nil)
+        currentImage = nil
+        items = []
+        cumulativeStartTimes = []
+        currentIndex = 0
+        globalTime = 0
+        isLoadingClip = false
+    }
+
     func toggle() {
         isPlaying ? pause() : play()
     }
